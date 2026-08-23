@@ -1,4 +1,5 @@
 node_modules/
 .pnpm-store/
-match_logs/*.json
 *.log
+match_logs/
+.env
