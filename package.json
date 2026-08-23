@@ -1,0 +1,14 @@
+{
+  "name": "five-line-tactics-alpha",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LAN/Tailscale two-player Alpha server for Five Line Tactics",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}
