@@ -1,0 +1,472 @@
+/* 單機測試固定槽位版面。
+   動態內容只能在自己的槽位內捲動／截斷，不參與外層尺寸計算。 */
+:root {
+  --local-gap: 12px;
+  --local-side: clamp(330px, 21vw, 390px);
+  --local-hand-height: 148px;
+}
+
+html,
+body {
+  overflow: hidden;
+}
+
+.app {
+  padding: 10px 12px 12px;
+  grid-template-rows: 54px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.top {
+  min-height: 0;
+  height: 54px;
+  padding: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.top > * {
+  flex: 0 0 auto;
+}
+
+.top h1 {
+  font-size: clamp(20px, 1.45vw, 27px);
+}
+
+.layout {
+  grid-template-columns: minmax(0, 1fr) var(--local-side);
+  gap: var(--local-gap);
+}
+
+/* 桌機版：棋盤、底部牌架、戰況是三個互不推擠的固定槽位。
+   手牌採戰術卡牌遊戲常見的水平 action bar，而不是設定選單式的直排卡片。 */
+.gameCol {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) var(--local-hand-height);
+  gap: var(--local-gap);
+}
+
+.boardWrap {
+  padding: 10px;
+  overflow: hidden;
+}
+
+.board {
+  border-width: 2px;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, .24);
+}
+
+.cell {
+  overflow: hidden;
+}
+
+/* 棋子放大，但星級、圖示、HP、血條仍全部鎖在單格內。 */
+.unit,
+.unit.p1,
+.unit.p2 {
+  left: 50%;
+  top: 50%;
+  width: 88%;
+  height: 88%;
+  transform: translate(-50%, -50%);
+  overflow: hidden;
+  border-width: clamp(2px, .22vw, 4px);
+}
+
+.unit.p1 {
+  border-color: #ff8787;
+  background: #71303a;
+}
+
+.unit.p2 {
+  border-color: #74c0fc;
+  background: #24517a;
+}
+
+.unitIcon {
+  top: 44%;
+  font-size: clamp(22px, 2.5vw, 38px);
+}
+
+.stars {
+  top: 5%;
+  font-size: clamp(8px, .72vw, 12px);
+}
+
+.unit small {
+  bottom: 12%;
+  max-width: 94%;
+  padding: 0;
+  background: transparent;
+  font-size: clamp(7px, .64vw, 11px);
+}
+
+.hpbar {
+  left: 11%;
+  right: 11%;
+  bottom: 4%;
+}
+
+/* 底部指令牌架：左狀態／中央五張牌／右升階，三段永遠固定。 */
+.handPanel {
+  height: var(--local-hand-height);
+  min-height: 0;
+  margin: 0;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: clamp(174px, 14vw, 220px) minmax(0, 1fr) clamp(190px, 16vw, 250px);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 12px;
+  overflow: hidden;
+}
+
+.handHeader {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: 30px 24px minmax(0, 1fr);
+  align-content: center;
+  padding: 8px 10px;
+  border-right: 1px solid #2b3443;
+  overflow: hidden;
+}
+
+.handHeader strong,
+.handHeader .meta,
+.handHeader .handHint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.handHeader strong {
+  font-size: 18px;
+}
+
+.hand {
+  margin: 0;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: clamp(6px, .6vw, 10px);
+  padding: 1px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.card {
+  flex: 1 1 120px;
+  width: auto;
+  min-width: 104px;
+  max-width: 148px;
+  height: 126px;
+  min-height: 126px;
+  padding: 6px 7px;
+  border-width: 1px;
+  background: linear-gradient(180deg, #273142 0%, #1d2430 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 5px 14px rgba(0,0,0,.18);
+}
+
+.card:hover:not(:disabled) {
+  background: linear-gradient(180deg, #303c50 0%, #222b39 100%);
+  border-color: #71809a;
+}
+
+.card.sel {
+  outline: 2px solid var(--warn);
+  outline-offset: -2px;
+  border-color: #ffe066;
+  background: linear-gradient(180deg, #394253 0%, #252d3a 100%);
+}
+
+.card .ico {
+  font-size: 28px;
+}
+
+.card .name {
+  font-size: 13px;
+}
+
+.cardStats {
+  font-size: 10px;
+}
+
+.rankRow {
+  min-height: 0;
+  height: auto;
+  margin: 0;
+  padding: 9px 0 9px 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: 44px;
+  align-content: center;
+  gap: 7px;
+  overflow-y: auto;
+  border-left: 1px solid #2b3443;
+}
+
+.rankRow:empty::before {
+  content: "選擇手牌後\A在此設定星級";
+  color: #7e8a9b;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-line;
+  align-self: center;
+}
+
+/* 大卡從手牌欄內側展開，固定尺寸，不改變任何面板位置。 */
+.cardDetail {
+  left: clamp(186px, 15vw, 232px);
+  right: auto;
+  bottom: calc(100% + 10px);
+  width: min(420px, calc(100vw - var(--local-side) - 280px));
+  height: 310px;
+}
+
+/* 戰況側欄使用固定三列；文字增加時只在各自區塊內捲動。 */
+.side {
+  padding: 10px;
+  display: grid;
+  grid-template-rows: 282px 112px minmax(0, 1fr);
+  gap: 9px;
+  overflow: hidden;
+}
+
+.section {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.section h3 {
+  height: 20px;
+  margin: 0 0 8px;
+}
+
+.turnSection {
+  display: grid;
+  grid-template-rows: 20px 28px 42px 40px 47px minmax(0, 1fr);
+  gap: 6px;
+}
+
+.turnSection h3 {
+  margin: 0;
+}
+
+.turn {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status {
+  min-height: 0;
+  padding: 7px 9px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.actionStatus,
+.artilleryStatus,
+.artBtn {
+  margin-top: 0;
+}
+
+.turnSection .note {
+  margin: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.previewSection,
+.logSection {
+  display: grid;
+  grid-template-rows: 20px minmax(0, 1fr);
+}
+
+.previewSection .combatPreview {
+  min-height: 0;
+  overflow: auto;
+}
+
+.logSection .log {
+  height: auto;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+/* 中等寬度：保持固定槽位，手牌移到底部以保住棋盤可用寬度。 */
+@media (max-width: 1180px) {
+  :root {
+    --local-side: clamp(310px, 30vw, 350px);
+  }
+
+  .handPanel {
+    grid-template-columns: 150px minmax(0, 1fr) 170px;
+    gap: 8px;
+  }
+
+  .handHeader {
+    grid-template-columns: minmax(0,1fr);
+    grid-template-rows: 30px 22px minmax(0,1fr);
+    padding: 6px 8px;
+  }
+
+  .card {
+    flex: 1 0 92px;
+    min-width: 92px;
+    height: 126px;
+    min-height: 126px;
+  }
+
+  .card .ico { font-size: 25px; }
+  .cardStats { font-size: 9px; line-height: 1.32; }
+
+  .rankRow {
+    height: auto;
+    padding: 8px 0 8px 8px;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .rankRow .btn { padding: 6px 8px; }
+
+  .cardDetail {
+    left: 12px;
+    bottom: calc(100% + 10px);
+    width: min(420px, calc(100vw - var(--local-side) - 52px));
+  }
+}
+
+/* 窄視窗使用固定順序的單欄；區塊自身尺寸固定，整頁只做垂直捲動。 */
+@media (max-width: 900px) {
+  html,
+  body {
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .app {
+    height: auto;
+    min-height: 100vh;
+    padding: 8px;
+    grid-template-rows: 54px auto;
+    overflow: visible;
+  }
+
+  .top {
+    height: 54px;
+    min-height: 54px;
+    flex-wrap: nowrap;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    overflow: visible;
+  }
+
+  .gameCol {
+    display: grid;
+    grid-template-rows: min(94vw, 72vh) 188px;
+    gap: 10px;
+  }
+
+  .handPanel {
+    height: 188px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 32px 104px 34px;
+    gap: 5px;
+    padding: 8px 10px;
+  }
+
+  .handHeader {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 18px 14px;
+    padding: 0;
+    border-right: 0;
+  }
+
+  .handHeader .handHint {
+    grid-column: 1 / -1;
+  }
+
+  .hand {
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  .card {
+    flex: 0 0 104px;
+    width: 104px;
+    min-width: 104px;
+    height: 102px;
+    min-height: 102px;
+  }
+
+  .card .ico { font-size: 22px; }
+  .cardStats { font-size: 9px; line-height: 1.25; }
+
+  .rankRow {
+    height: 34px;
+    padding: 3px 0 0;
+    display: flex;
+    flex-wrap: nowrap;
+    border-top: 1px solid #2b3443;
+    border-left: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .rankRow .btn { padding: 5px 8px; }
+
+  .boardWrap {
+    height: auto;
+    min-height: 0;
+  }
+
+  .side {
+    height: 620px;
+    margin: 0;
+    grid-template-rows: 282px 112px minmax(0, 1fr);
+  }
+
+  .cardDetail {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    width: auto;
+    height: min(310px, 54vh);
+  }
+}
+
+@media (max-width: 560px) {
+  .top h1 {
+    width: auto;
+    font-size: 18px;
+  }
+
+  .boardWrap {
+    padding: 5px;
+  }
+
+  .unit,
+  .unit.p1,
+  .unit.p2 {
+    width: 86%;
+    height: 86%;
+  }
+
+  .unitIcon {
+    font-size: clamp(18px, 6vw, 27px);
+  }
+
+  .unit small {
+    font-size: clamp(6px, 1.8vw, 9px);
+  }
+}
