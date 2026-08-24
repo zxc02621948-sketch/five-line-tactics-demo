@@ -1,4 +1,26 @@
-const crypto = require("crypto");
+// 同一份規則同時給 Node（server 權威模式）與瀏覽器（/local 單機）使用。
+// 只做模組邊界的相容處理，規則邏輯完全共用。
+const nodeCrypto = (() => {
+  if (typeof require !== "function") return null;
+  try { return require("crypto"); } catch { return null; }
+})();
+const webCrypto = typeof globalThis !== "undefined" ? globalThis.crypto : null;
+const randomUUID = () => {
+  if (nodeCrypto && nodeCrypto.randomUUID) return nodeCrypto.randomUUID();
+  if (webCrypto && webCrypto.randomUUID) return webCrypto.randomUUID();
+  return `match-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+};
+const randomBelow = max => {
+  if (nodeCrypto && nodeCrypto.randomInt) return nodeCrypto.randomInt(max);
+  if (webCrypto && webCrypto.getRandomValues) {
+    const limit = Math.floor(0x100000000 / max) * max;      // 拒絕取樣，避免模數偏差
+    const buffer = new Uint32Array(1);
+    let value;
+    do { webCrypto.getRandomValues(buffer); value = buffer[0]; } while (value >= limit);
+    return value % max;
+  }
+  return Math.floor(Math.random() * max);
+};
 
 const N = 9;
 const TYPES = Object.freeze({
@@ -47,9 +69,9 @@ function counterBonus(attacker, defender) {
 
 class GameEngine {
   constructor({ matchId, roomCode, randomInt, turnOrderMode = "alternating", startingPlayer } = {}) {
-    this.matchId = matchId || crypto.randomUUID();
+    this.matchId = matchId || randomUUID();
     this.roomCode = roomCode || "TEST00";
-    this.randomInt = randomInt || (max => crypto.randomInt(max));
+    this.randomInt = randomInt || (max => randomBelow(max));
     this.turnOrderMode = turnOrderMode === "fixed" ? "fixed" : "alternating";
     this.startingPlayer = this.turnOrderMode === "fixed"
       ? (startingPlayer === 1 || startingPlayer === 2 ? startingPlayer : this.randomInt(2) + 1)
@@ -708,10 +730,6 @@ class GameEngine {
   }
 }
 
-module.exports = {
-  GameEngine,
-  TYPES,
-  DECK_TEMPLATE,
-  baseStats,
-  cardCost,
-};
+const FiveLineEngine = { GameEngine, TYPES, DECK_TEMPLATE, baseStats, cardCost };
+if (typeof module !== "undefined" && module.exports) module.exports = FiveLineEngine;
+if (typeof globalThis !== "undefined") globalThis.FiveLineEngine = FiveLineEngine;
