@@ -353,3 +353,40 @@ test("兩個頁面都能真的隱藏 overlay：.hidden 必須來自共用樣式"
   assert.match(wiring, /classList\.add\("hidden"\)/);
   assert.match(wiring, /classList\.remove\("hidden"\)/);
 });
+
+test("棋盤尺寸由 JS 量容器寫入像素，不依賴脆弱的 CSS 推算", () => {
+  // 之前用 aspect-ratio + max-height 會被壓扁、用容器查詢單位會整個塌掉，
+  // 改成量容器直接寫像素，並取 9 的倍數讓每格是整數像素。
+  assert.match(sharedUi, /function autoSizeBoard\(boardEl, wrapEl\)/);
+  assert.match(sharedUi, /Math\.floor\(available \/ 9\) \* 9/, "應取 9 的倍數避免半像素格線");
+  assert.match(sharedUi, /boardEl\.style\.width = /);
+  assert.match(sharedUi, /boardEl\.style\.height = /);
+  assert.match(sharedUi, /return apply;/, "必須回傳 apply 讓 render 每次重算");
+
+  // 兩個 client 都在每次重繪時重新計算，不倚賴 ResizeObserver 的觸發時機
+  for (const [label, text] of [["alpha_client.js", client], ["local_client.js", localClient]]) {
+    assert.match(text, /const sizeBoard = UI\.autoSizeBoard\(/, `${label} 必須取得 sizeBoard`);
+    const start = text.indexOf("function renderBoard()");
+    const end = text.indexOf("function renderHand()");
+    assert.match(text.slice(start, end), /sizeBoard\(\);/, `${label} 的 renderBoard 必須重算尺寸`);
+  }
+
+  // CSS 不得再自己推算棋盤大小
+  for (const [label, text] of [["alpha_board.css", css], ["index.html", localHtml]]) {
+    const rule = text.match(/\.board\s*\{[^}]*\}/)[0];
+    assert.doesNotMatch(rule, /aspect-ratio/, `${label} 的 .board 不應再用 aspect-ratio`);
+    assert.doesNotMatch(rule, /cqw|cqh/, `${label} 的 .board 不應再用容器查詢單位`);
+    assert.doesNotMatch(rule, /max-height/, `${label} 的 .board 不應再用 max-height`);
+  }
+});
+
+test("grid 軌道不得被不換行的手牌撐爆版面", () => {
+  // 1fr 的隱含最小值是 min-content，會被固定寬度的手牌列撐開，
+  // 導致整條版面超出視窗（手機上大卡與面板會跑出畫面）。
+  const appRule = localHtml.match(/\.app\s*\{[^}]*\}/)[0];
+  assert.match(appRule, /grid-template-columns:\s*minmax\(0,\s*1fr\)/, ".app 的欄軌必須是 minmax(0,1fr)");
+  assert.match(localHtml, /\.gameCol\{[^}]*min-width:0/, ".gameCol 必須可縮");
+  assert.doesNotMatch(localHtml, /\.layout\{grid-template-columns:1fr;/, "窄螢幕的 .layout 不得用裸 1fr");
+  assert.match(css, /\.hand \{[^}]*overflow-x:\s*auto/, "手牌列必須可水平捲動而不是撐開容器");
+  assert.match(css, /\.cardDetail\s*\{[\s\S]*?\}[\s\S]*?max-width:\s*calc\(100vw/, "小螢幕的大卡需以視窗寬度為硬上限");
+});

@@ -137,6 +137,28 @@
       </ul>`;
   }
 
+  // 棋盤尺寸：量容器、直接寫像素。棋盤類遊戲的標準做法，不依賴 aspect-ratio /
+  // max-height / 容器查詢這些會互相覆寫的規則，所以不會被壓扁或塌陷。
+  // 取 9 的倍數，讓每一格都是整數像素、格線不會有半像素縫隙。
+  function autoSizeBoard(boardEl, wrapEl) {
+    if (!boardEl || !wrapEl) return;
+    const apply = () => {
+      const style = getComputedStyle(wrapEl);
+      const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+      const padY = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+      const available = Math.min(wrapEl.clientWidth - padX, wrapEl.clientHeight - padY);
+      const size = Math.max(180, Math.floor(available / 9) * 9);   // 保底 180px，避免容器暫時為 0
+      boardEl.style.width = `${size}px`;
+      boardEl.style.height = `${size}px`;
+    };
+    apply();
+    requestAnimationFrame(apply);                                  // 首次版面完成後再算一次
+    globalThis.addEventListener("load", apply);
+    globalThis.addEventListener("resize", apply);
+    if (typeof ResizeObserver === "function") new ResizeObserver(apply).observe(wrapEl);
+    return apply;                                                  // 交給 render() 每次重算，不倚賴 RO 的時機
+  }
+
   // 大卡詳情：沒有目標時整張卡隱藏（.idle），有目標才浮出。
   // 因為 .cardDetail 是 absolute，出現與消失都不會推擠版面。
   function renderCardDetail(box, type, catalog) {
@@ -167,5 +189,6 @@
   globalThis.AlphaUI = {
     ICONS, NAMES, SHORT_TAG, ELITE_TAG, ABILITY, ELITE_ABILITY,
     handCardHtml, unitHtml, unitTitle, cardDetailHtml, renderCardDetail, rulesHtml, wireRulesOverlay,
+    autoSizeBoard,
   };
 })();

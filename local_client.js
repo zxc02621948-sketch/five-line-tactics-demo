@@ -32,7 +32,11 @@
   }
 
   // ---- 顯示 ----
+  // 每次重繪都依當下容器重算棋盤尺寸，不倚賴 ResizeObserver 的觸發時機
+  const sizeBoard = UI.autoSizeBoard(document.querySelector("#board"), document.querySelector(".boardWrap"));
+
   function renderBoard() {
+    sizeBoard();
     const boardEl = $("#board");
     boardEl.innerHTML = "";
     for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {

@@ -1,11 +1,14 @@
 .boardWrap {
   display: flex;
+  align-items: center;
   justify-content: center;
+  overflow: hidden;
 }
 
+/* 棋盤尺寸一律由 AlphaUI.autoSizeBoard() 以像素寫入，CSS 不再自己推算大小。
+   這樣就不會有 aspect-ratio 被 max-height 蓋掉、或容器查詢失效的問題。 */
 .board {
-  width: min(76vh, 760px, 100%);
-  aspect-ratio: 1 / 1;
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: repeat(9, minmax(0, 1fr));
   grid-template-rows: repeat(9, minmax(0, 1fr));
@@ -18,7 +21,6 @@
   position: relative;
   min-width: 0;
   min-height: 0;
-  aspect-ratio: 1 / 1;
   overflow: hidden;
   border: 1px solid #3b4658;
   background: #18202b;
@@ -167,8 +169,10 @@
 /* 星級選擇列永遠佔位；選牌前後高度不變 */
 .rankRow { min-height: 40px; align-items: flex-start; }
 
-/* 手牌面板是大卡的定位基準，且高度固定 */
-.handPanel { position: relative; }
+/* 手牌面板是大卡的定位基準；min-width:0 讓它不會被固定寬度的卡片撐爆版面，
+   卡片列自己水平捲動即可。 */
+.handPanel { position: relative; min-width: 0; }
+.hand { min-width: 0; overflow-x: auto; overflow-y: hidden; }
 
 /* 卡牌詳情＝浮在手牌上方的大卡。position:absolute 讓它完全不參與版面流，
    出現或消失都不會推動棋盤與其他區塊。尺寸固定，內容多的兵種內部捲動。 */
@@ -198,5 +202,10 @@
 .handHint { font-size: 11px; color: #7e8a9b; white-space: nowrap; }
 
 @media (max-width: 720px) {
-  .cardDetail { left: 8px; right: 8px; width: auto; height: 260px; }
+  /* 小螢幕：大卡貼齊畫面兩側，並以視窗寬度為硬上限，不會被容器寬度帶出畫面 */
+  .cardDetail {
+    left: 8px; right: 8px; width: auto;
+    max-width: calc(100vw - 16px);
+    height: 260px;
+  }
 }
