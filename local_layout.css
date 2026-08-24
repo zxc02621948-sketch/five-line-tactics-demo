@@ -118,7 +118,9 @@ body {
   grid-template-columns: clamp(174px, 14vw, 220px) minmax(0, 1fr) clamp(190px, 16vw, 250px);
   grid-template-rows: minmax(0, 1fr);
   gap: 12px;
-  overflow: hidden;
+  /* 不可用 overflow:hidden：兵種大卡是往上浮出面板外的，會被整個裁掉。
+     需要裁切的是牌列本身，交給 .hand 的水平捲動處理。 */
+  overflow: visible;
 }
 
 .handHeader {

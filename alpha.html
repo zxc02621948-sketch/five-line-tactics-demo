@@ -6,63 +6,83 @@
   <title>五連戰線｜遠端真人 Alpha</title>
   <link rel="icon" href="/icon-192.png">
   <link rel="stylesheet" href="/alpha_board.css">
+  <link rel="stylesheet" href="/game_shell.css">
+  <link rel="stylesheet" href="/local_layout.css?v=3">
   <style>
-    :root{--bg:#10131a;--panel:#1a202b;--line:#343d4d;--text:#edf2f7;--muted:#aab4c3;--red:#ff6b6b;--blue:#4dabf7;--warn:#ffd43b;--green:#69db7c}
-    *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#20293a,#0d1016 55%);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh}
-    button,input{font:inherit}.app{max-width:1420px;margin:auto;padding:14px}.top{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}.top h1{font-size:22px;margin:0 10px 0 0}.pill{border:1px solid var(--line);background:#151b25;border-radius:999px;padding:5px 9px;color:var(--muted);font-size:12px}
-    .panel,.section{background:rgba(26,32,43,.95);border:1px solid var(--line);border-radius:14px;padding:12px;box-shadow:0 8px 30px #0004}.lobby{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}.lobby input{width:150px;background:#0f141d;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px;text-transform:uppercase}.btn{border:1px solid #465269;background:#273247;color:var(--text);border-radius:9px;padding:8px 11px;cursor:pointer}.btn:hover:not(:disabled){filter:brightness(1.15)}.btn:disabled{opacity:.42;cursor:not-allowed}.btn.active{outline:2px solid var(--warn)}.btn.danger{background:#6b2730}.btn.art{background:#604d12}
-    /* 連線頁是內容撐高型版面，棋盤容器需要一個明確高度，autoSizeBoard 才量得到 */
-    .boardWrap{height:min(70vh,720px)}
-    .connection{font-weight:700}.ok{color:var(--green)}.bad{color:var(--red)}.wait{color:var(--warn)}.layout{display:grid;grid-template-columns:minmax(420px,1fr) minmax(280px,390px);gap:12px}.gameCol{min-width:0}
-    .hand{display:flex;gap:7px;flex-wrap:wrap}.card{min-width:66px;min-height:66px;background:#222c3b;color:var(--text);border:1px solid #4b5870;border-radius:10px;cursor:pointer;padding:6px}.card.sel{outline:3px solid var(--warn)}.ico{display:block;font-size:23px}.name{font-size:12px;font-weight:700}.meta,.note{font-size:12px;color:var(--muted)}.rankRow{display:flex;gap:6px;margin-top:7px}.side{display:flex;flex-direction:column;gap:10px;max-height:calc(100vh - 90px);overflow:auto}.section h3{margin:0 0 8px;font-size:15px}.turn{font-size:18px;font-weight:900}.status{padding:8px;border-radius:9px;background:#111722;border:1px solid var(--line);white-space:pre-line}.log{height:330px;overflow:auto;display:flex;flex-direction:column-reverse;gap:5px;font-size:12px}.log div{padding:6px;border-bottom:1px solid #30394a}.log .r{color:#ff9b9b}.log .b{color:#91caff}.log .kill,.log .winner{color:var(--warn);font-weight:800}.hidden{display:none!important}
-    @media(max-width:900px){.layout{grid-template-columns:1fr}.side{max-height:none}.board{width:min(96vw,700px)}}
+    /* 只保留連線專屬的樣式；版面一律沿用與單機相同的 game_shell + local_layout。 */
+    .lobby { display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; }
+    .lobby input {
+      width: 132px; background: #0f141d; color: var(--text);
+      border: 1px solid var(--grid); border-radius: 8px; padding: 7px 9px; text-transform: uppercase;
+    }
+    .connection { font-weight: 700; white-space: nowrap; }
+    .ok { color: var(--good) } .bad { color: var(--danger) } .wait { color: var(--warn) }
+    .btn.art { background: #604d12 }
+    #roomIdentity { white-space: nowrap; font-size: 13px }
   </style>
 </head>
 <body>
 <div class="app">
   <div class="top">
-    <h1>五連戰線｜遠端真人 Alpha</h1>
-    <span class="pill">Server Authoritative</span><span class="pill">9×9</span><span class="pill">兩人房</span>
+    <h1>五連戰線｜連線對戰</h1>
+    <a class="btn modeLink" href="/local">🎮 單機測試</a>
+    <span id="socketStatus" class="connection wait">連線中…</span>
+    <span class="lobby">
+      <button id="createBtn" class="btn" disabled>建立房間</button>
+      <input id="roomInput" maxlength="6" placeholder="房號">
+      <button id="joinBtn" class="btn" disabled>加入房間</button>
+      <button id="copyRoomBtn" class="btn hidden" type="button">複製房號</button>
+    </span>
+    <strong id="roomIdentity"></strong>
+    <button id="backToEntryBtn" class="btn" type="button">← 模式選擇</button>
+    <span class="pill">9×9</span>
+    <span class="pill">25 張循環牌組</span>
     <span class="pill counterHint" title="盾克劍、劍克槍、槍克盾">
       相剋　<b>🛡盾</b> → <b>⚔劍</b> → <b>🔱槍</b> → <b>🛡盾</b>
     </span>
     <button id="helpBtn" class="btn helpBtn" type="button">？ 規則</button>
   </div>
-  <div class="panel lobby">
-    <span id="socketStatus" class="connection wait">連線中…</span>
-    <button id="createBtn" class="btn" disabled>建立房間</button>
-    <input id="roomInput" maxlength="6" placeholder="輸入 6 位房號">
-    <button id="joinBtn" class="btn" disabled>加入房間</button>
-    <button id="copyRoomBtn" class="btn hidden" type="button">複製房號</button>
-    <strong id="roomIdentity"></strong>
-    <button id="backToEntryBtn" class="btn" type="button" style="margin-left:auto">← 返回模式選擇</button>
-  </div>
+
   <div class="layout">
     <div class="gameCol">
-      <div class="panel boardWrap"><div id="board" class="board"></div></div>
-      <div class="panel handPanel" style="margin-top:12px">
-        <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><strong id="handTitle">等待加入房間</strong><span id="deckInfo" class="meta"></span><span class="handHint">滑鼠移到手牌（或點選）可看兵種大卡</span></div>
-        <div id="hand" class="hand" style="margin-top:8px"></div>
+      <div class="boardWrap"><div id="board" class="board"></div></div>
+      <div class="handPanel">
+        <div class="handHeader">
+          <strong id="handTitle">等待加入房間</strong>
+          <span class="meta" id="deckInfo"></span>
+          <span class="handHint">滑鼠移到手牌（或點選）可看兵種大卡</span>
+        </div>
+        <div id="hand" class="hand"></div>
         <div id="rankRow" class="rankRow"></div>
         <div id="cardDetail" class="cardDetail idle"></div>
       </div>
     </div>
+
     <div class="side">
-      <div class="section">
-        <h3>房間與回合</h3>
-        <div id="connectionDetail" class="status">尚未建立或加入房間。</div>
-        <div id="turnText" class="turn" style="margin-top:8px"></div>
-        <div id="turnStatus" class="status" style="margin-top:8px"></div>
-        <div id="artilleryOverview" class="status" style="margin-top:8px">公開炮擊資源｜P1：2｜P2：2</div>
-        <button id="artilleryBtn" class="btn art" disabled style="margin-top:8px">炮擊</button>
-        <div class="note" style="margin-top:6px">炮擊只能在自己的部署前使用；使用後仍須部署。所有合法性與結算均由伺服器決定。</div>
+      <div class="section turnSection">
+        <h3>目前回合</h3>
+        <div id="turnText" class="turn"></div>
+        <div id="turnStatus" class="status actionStatus"></div>
+        <div id="artilleryOverview" class="status artilleryStatus">炮擊資源｜P1：2｜P2：2</div>
+        <button id="artilleryBtn" class="btn artBtn ready" disabled>炮擊</button>
+        <div class="note">炮擊是部署前的額外戰術行動，每回合最多 1 次；炮擊後仍必須正常部署。3×3 範圍敵我皆傷：中心 30、外圈 12。</div>
       </div>
-      <div class="section"><h3>公開／私人資訊</h3><div id="privacyInfo" class="status">自己的手牌會顯示在左側；只會看到對方手牌數量。</div></div>
-      <div class="section"><h3>戰鬥紀錄</h3><div id="log" class="log"></div></div>
-      <div class="section hidden" id="matchSummarySection"><h3>終局摘要</h3><div id="matchSummary" class="status"></div></div>
+
+      <div class="section previewSection">
+        <h3>房間狀態</h3>
+        <div id="connectionDetail" class="combatPreview">尚未建立或加入房間。</div>
+        <div id="privacyInfo" class="combatPreview" style="display:none"></div>
+        <div id="matchSummary" class="combatPreview" style="display:none"></div>
+      </div>
+
+      <div class="section logSection">
+        <h3>戰報</h3>
+        <div id="log" class="log"></div>
+      </div>
     </div>
   </div>
 </div>
+
 <div id="entryOverlay" class="overlay">
   <div class="overlayBox">
     <h2>五連戰線　Alpha</h2>

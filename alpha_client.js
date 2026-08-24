@@ -222,7 +222,7 @@
       finished: "本局已結束。",
     };
     $("#connectionDetail").textContent = `${statusTexts[roomStatus] || statusTexts.none}${notice ? `\n${notice}` : ""}`;
-    $("#connectionDetail").className = `status ${roomStatus === "opponent_disconnected" || !connected ? "bad" : roomStatus === "waiting" ? "wait" : ""}`;
+    $("#connectionDetail").className = `combatPreview ${roomStatus === "opponent_disconnected" || !connected ? "bad" : roomStatus === "waiting" ? "wait" : ""}`;
     renderBoard();
     renderHand();
     renderLogs();
@@ -230,7 +230,7 @@
     if (!state) {
       $("#turnText").textContent = roomCode ? "等待對手" : "";
       $("#turnStatus").textContent = "兩人連線後由伺服器建立正式遊戲狀態。";
-      $("#privacyInfo").textContent = "自己的手牌會顯示在左側；對手只能看到手牌數量。";
+      $("#privacyInfo").style.display = "none";
       return;
     }
     $("#turnText").textContent = `第 ${state.roundNo} 輪｜P${state.firstPlayer} 先行｜現在 P${state.current}${state.turnOrderMode === "fixed" ? "｜本局固定順序" : ""}`;

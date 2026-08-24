@@ -17,16 +17,20 @@
   let artilleryMode = false;
   let notice = "";
   let aiThinking = false;
+  let resigned = null;                 // 棄賽者的 pid；棄賽只影響本機顯示，不動引擎規則
 
   const catalog = () => GameEngine.unitCatalog();
-  const humanTurn = () => engine && !engine.gameOver && !aiThinking
+  const finished = () => Boolean(resigned) || (engine && engine.gameOver);
+  // 對局已開始 ＝ 盤面上有棋子。開始後就不該還能自由切換模式。
+  const started = () => Boolean(engine) && engine.board.some(row => row.some(Boolean));
+  const humanTurn = () => engine && !finished() && !aiThinking
     && (mode === "pvp" || engine.current === 1);
 
   function reset() {
     // 對電腦與本機雙人都使用正式回合順序：固定 P1 → P2 → combat
     engine = new GameEngine({ roomCode: "LOCAL1", ...ALPHA_TURN_ORDER });
     selectedType = null; selectedRank = 1; hoverType = null;
-    artilleryMode = false; notice = ""; aiThinking = false;
+    artilleryMode = false; notice = ""; aiThinking = false; resigned = null;
     render();
     scheduleAi();
   }
@@ -123,11 +127,14 @@
     renderHand();
     renderLogs();
     const owner = mode === "pve" && engine.current === 2 ? "P2（電腦）" : `P${engine.current}`;
-    $("#turnText").textContent = engine.gameOver
-      ? (engine.winner === "draw" ? "雙方同時五連：平手" : `P${engine.winner} 獲勝`)
+    const winnerLabel = resigned
+      ? `P${resigned} 棄賽｜P${3 - resigned} 獲勝`
+      : engine.winner === "draw" ? "雙方同時五連：平手" : `P${engine.winner} 獲勝`;
+    $("#turnText").textContent = finished()
+      ? winnerLabel
       : `第 ${engine.roundNo} 輪｜${owner} 行動｜${engine.actionsThisRound === 0 ? "先手" : "後手"}`;
-    $("#status").textContent = engine.gameOver
-      ? "按「重開」開始新的一局。"
+    $("#status").textContent = finished()
+      ? "按「重開」開始新的一局，或切換對戰模式。"
       : artilleryMode ? "炮擊模式：點棋盤選擇 3×3 的中心格。"
         : selectedType ? `已選 ${"★".repeat(selectedRank)}${NAMES[selectedType]}，點空格部署。`
           : "先點手牌選擇兵種，再點棋盤空格部署。";
@@ -140,6 +147,20 @@
     artilleryBtn.disabled = !humanTurn() || me.artillery <= 0
       || engine.artilleryUsedThisTurn || engine.deploymentCommitted;
     artilleryBtn.className = `btn artBtn ${artilleryMode ? "active" : "ready"}`;
+    renderSessionControls();
+  }
+
+  // 對局進行中不顯示模式切換與重開，避免誤觸中斷戰鬥；改提供棄賽。
+  // 尚未落子或對局結束時才恢復，讓玩家可以自由換模式。
+  function renderSessionControls() {
+    const inGame = started() && !finished();
+    for (const id of ["#pveBtn", "#pvpBtn", "#resetBtn"]) {
+      $(id).classList.toggle("hidden", inGame);
+    }
+    const resign = $("#resignBtn");
+    resign.classList.toggle("hidden", !inGame);
+    resign.textContent = mode === "pve" ? "棄賽" : "結束對局";
+    resign.disabled = !inGame;
   }
 
   // ---- 操作 ----
@@ -163,7 +184,7 @@
 
   // ---- 對電腦模式的簡單啟發式（只使用引擎的公開介面）----
   function scheduleAi() {
-    if (mode !== "pve" || engine.gameOver || engine.current !== 2) return;
+    if (mode !== "pve" || finished() || engine.current !== 2) return;
     aiThinking = true;
     render();
     setTimeout(() => { aiThinking = false; aiMove(); }, 320);
@@ -191,7 +212,7 @@
   }
 
   function aiMove() {
-    if (engine.gameOver || engine.current !== 2) { render(); return; }
+    if (finished() || engine.current !== 2) { render(); return; }
     const player = engine.players[1];
     if (!player.hand.length) { render(); return; }
 
@@ -231,6 +252,14 @@
   UI.wireRulesOverlay(catalog);
   $("#artilleryBtn").onclick = () => { if (humanTurn()) { artilleryMode = !artilleryMode; render(); } };
   $("#resetBtn").onclick = reset;
+  $("#resignBtn").onclick = () => {
+    if (!started() || finished()) return;
+    // 只在本機顯示層結束對局，不修改 game_engine.js 的規則
+    resigned = mode === "pve" ? 1 : engine.current;
+    artilleryMode = false; selectedType = null; hoverType = null;
+    notice = mode === "pve" ? "你已棄賽。" : `P${resigned} 結束了本局。`;
+    render();
+  };
   $("#pveBtn").onclick = () => {
     mode = "pve";
     $("#pveBtn").classList.add("active"); $("#pvpBtn").classList.remove("active");

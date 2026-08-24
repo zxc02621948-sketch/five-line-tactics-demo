@@ -14,6 +14,8 @@ const css = read("alpha_board.css");
 const localHtml = read("index.html");
 const localClient = read("local_client.js");
 const sharedUi = read("alpha_ui.js");
+const shellCss = read("game_shell.css");
+const layoutCss = read("local_layout.css");
 const server = read("server.js");
 const stripComments = text => text.replace(/^\s*\/\/.*$/gm, "");
 
@@ -45,7 +47,7 @@ test("主要入口同時提供單機與連線兩個選項", () => {
 });
 
 test("兩種模式都不再標示為舊版原型", () => {
-  assert.match(localHtml, /href="\/"[^>]*>← 主畫面/);
+  assert.match(localHtml, /class="btn modeLink" href="\/">🌐 連線對戰/);
   assert.doesNotMatch(localHtml, /舊版原型|舊版規則/);
   assert.doesNotMatch(html, /舊版原型|舊版規則/);
   assert.match(html, /同一套規則引擎/);
@@ -56,7 +58,7 @@ test("連線對戰有建立房間、複製房號、加入房間、返回模式�
   assert.match(html, /id="roomInput"/);
   assert.match(html, /id="joinBtn"[\s\S]*?加入房間/);
   assert.match(html, /id="copyRoomBtn"[\s\S]*?複製房號/);
-  assert.match(html, /id="backToEntryBtn"[\s\S]*?返回模式選擇/);
+  assert.match(html, /id="backToEntryBtn"[\s\S]*?模式選擇/);
   assert.match(client, /\$\("#copyRoomBtn"\)\.onclick/);
   assert.match(client, /\$\("#backToEntryBtn"\)\.onclick = showEntry/);
 });
@@ -372,7 +374,7 @@ test("棋盤尺寸由 JS 量容器寫入像素，不依賴脆弱的 CSS 推算",
   }
 
   // CSS 不得再自己推算棋盤大小
-  for (const [label, text] of [["alpha_board.css", css], ["index.html", localHtml]]) {
+  for (const [label, text] of [["alpha_board.css", css], ["game_shell.css", shellCss]]) {
     const rule = text.match(/\.board\s*\{[^}]*\}/)[0];
     assert.doesNotMatch(rule, /aspect-ratio/, `${label} 的 .board 不應再用 aspect-ratio`);
     assert.doesNotMatch(rule, /cqw|cqh/, `${label} 的 .board 不應再用容器查詢單位`);
@@ -383,10 +385,74 @@ test("棋盤尺寸由 JS 量容器寫入像素，不依賴脆弱的 CSS 推算",
 test("grid 軌道不得被不換行的手牌撐爆版面", () => {
   // 1fr 的隱含最小值是 min-content，會被固定寬度的手牌列撐開，
   // 導致整條版面超出視窗（手機上大卡與面板會跑出畫面）。
-  const appRule = localHtml.match(/\.app\s*\{[^}]*\}/)[0];
+  const appRule = shellCss.match(/\.app\s*\{[^}]*\}/)[0];
   assert.match(appRule, /grid-template-columns:\s*minmax\(0,\s*1fr\)/, ".app 的欄軌必須是 minmax(0,1fr)");
-  assert.match(localHtml, /\.gameCol\{[^}]*min-width:0/, ".gameCol 必須可縮");
-  assert.doesNotMatch(localHtml, /\.layout\{grid-template-columns:1fr;/, "窄螢幕的 .layout 不得用裸 1fr");
+  assert.match(shellCss, /\.gameCol\{[^}]*min-width:0/, ".gameCol 必須可縮");
+  assert.doesNotMatch(shellCss, /\.layout\{grid-template-columns:1fr;/, "窄螢幕的 .layout 不得用裸 1fr");
   assert.match(css, /\.hand \{[^}]*overflow-x:\s*auto/, "手牌列必須可水平捲動而不是撐開容器");
   assert.match(css, /\.cardDetail\s*\{[\s\S]*?\}[\s\S]*?max-width:\s*calc\(100vw/, "小螢幕的大卡需以視窗寬度為硬上限");
+});
+
+/* ---------------- 這一輪的四項 UX 需求 ---------------- */
+
+test("兵種大卡不得被任何祖先裁切", () => {
+  // 大卡是往上浮出手牌面板外的；面板一旦 overflow:hidden 就會被整個切掉，
+  // 表現就是「卡片說明不見了」。
+  // 先去掉 CSS 註解，否則註解裡提到的字串會被誤判成實際宣告
+  const layoutNoComments = layoutCss.replace(/\/\*[\s\S]*?\*\//g, "");
+  const rules = layoutNoComments.match(/\.handPanel\s*\{[^}]*\}/g) || [];
+  assert.ok(rules.length, "local_layout.css 應定義 .handPanel");
+  for (const rule of rules) {
+    assert.doesNotMatch(rule, /overflow:\s*hidden/, ".handPanel 不得裁切浮出的大卡");
+  }
+  assert.match(rules[0], /overflow:\s*visible/, "主要 .handPanel 規則必須明確允許溢出");
+  assert.doesNotMatch(shellCss, /\.handPanel\{[^}]*overflow:\s*hidden/);
+});
+
+test("單機與連線使用同一組版面樣式與結構", () => {
+  for (const [label, page] of [["alpha.html", html], ["index.html", localHtml]]) {
+    assert.match(page, /href="\/game_shell\.css"/, `${label} 必須載入共用外殼樣式`);
+    assert.match(page, /href="\/local_layout\.css/, `${label} 必須載入共用版面`);
+    // 相同的結構槽位
+    for (const marker of ['class="top"', 'class="layout"', 'class="gameCol"', 'class="boardWrap"',
+      'class="handPanel"', 'class="handHeader"', 'id="hand"', 'id="rankRow"',
+      'id="cardDetail"', 'class="side"', 'turnSection', 'previewSection', 'logSection']) {
+      assert.ok(page.includes(marker), `${label} 缺少共用結構 ${marker}`);
+    }
+  }
+  for (const route of ["/game_shell.css", "/local_layout.css"]) {
+    assert.ok(server.includes(`["${route}"`), `server 缺少 ${route} 路由`);
+  }
+});
+
+test("兩個模式都有直接前往對方的按鈕", () => {
+  // 單機 → 連線
+  assert.match(localHtml, /class="btn modeLink" href="\/">🌐 連線對戰/);
+  // 連線 → 單機
+  assert.match(html, /class="btn modeLink" href="\/local">🎮 單機測試/);
+});
+
+test("對局進行中隱藏模式切換與重開，改提供棄賽", () => {
+  const resignTag = localHtml.match(/<button[^>]*id="resignBtn"[^>]*>/)[0];
+  assert.match(resignTag, /class="[^"]*hidden[^"]*"/, "棄賽鈕預設隱藏");
+  assert.match(localClient, /function renderSessionControls\(\)/);
+  // 開始判定：盤面上有棋子
+  assert.match(localClient, /const started = \(\) => Boolean\(engine\) && engine\.board\.some\(row => row\.some\(Boolean\)\)/);
+  // 對局中三顆鈕一起隱藏
+  assert.match(localClient, /for \(const id of \["#pveBtn", "#pvpBtn", "#resetBtn"\]\)/);
+  assert.match(localClient, /classList\.toggle\("hidden", inGame\)/);
+  assert.match(localClient, /resign\.classList\.toggle\("hidden", !inGame\)/);
+});
+
+test("棄賽會結束對局且不修改引擎規則", () => {
+  assert.match(localClient, /\$\("#resignBtn"\)\.onclick/);
+  assert.match(localClient, /const finished = \(\) => Boolean\(resigned\)/);
+  // AI 與玩家在棄賽後都不能再行動
+  assert.match(localClient, /if \(mode !== "pve" \|\| finished\(\) \|\| engine\.current !== 2\) return;/);
+  assert.match(localClient, /const humanTurn = \(\) => engine && !finished\(\)/);
+  // 棄賽只改本機顯示狀態，不得動到引擎的勝負欄位
+  const handler = localClient.match(/\$\("#resignBtn"\)\.onclick[\s\S]*?\n  \};/)[0];
+  assert.doesNotMatch(handler, /engine\.gameOver\s*=|engine\.winner\s*=/, "不得直接改寫引擎狀態");
+  // 重開會清掉棄賽狀態
+  assert.match(localClient, /aiThinking = false; resigned = null;/);
 });

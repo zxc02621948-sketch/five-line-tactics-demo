@@ -19,6 +19,7 @@ const STATIC_FILES = new Map([
   ["/alpha-fixed.html", ["alpha.html", "text/html; charset=utf-8"]],
   ["/alpha_client.js", ["alpha_client.js", "text/javascript; charset=utf-8"]],
   ["/alpha_board.css", ["alpha_board.css", "text/css; charset=utf-8"]],
+  ["/game_shell.css", ["game_shell.css", "text/css; charset=utf-8"]],
   ["/local_layout.css", ["local_layout.css", "text/css; charset=utf-8"]],
   ["/alpha_ui.js", ["alpha_ui.js", "text/javascript; charset=utf-8"]],
   ["/game_engine.js", ["game_engine.js", "text/javascript; charset=utf-8"]],
