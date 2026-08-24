@@ -521,3 +521,42 @@ test("靜態資源在 alpha 期間不得被快取", () => {
     }
   }
 });
+
+test("炮擊預覽的參數必須來自引擎，且與實際結算一致", () => {
+  const rules = GameEngine.artilleryRules();
+  assert.deepEqual(rules, { perPlayer: 2, radius: 1, center: 30, outer: 12, friendlyFire: true });
+
+  // 與 artillery() 的實際結果對照，數值漂移時這裡會紅
+  const engine = fixed();
+  engine.board = Array.from({ length: 9 }, () => Array(9).fill(null));
+  const mk = pid => ({ id: pid, pid, type: "sword", rank: 1, cards: 1, hp: 120, maxHp: 120, atk: 24 });
+  engine.board[4][4] = mk(2);          // 中心
+  engine.board[4][5] = mk(2);          // 外圈敵軍
+  engine.board[3][3] = mk(1);          // 外圈友軍
+  engine.players[0].hand = ["sword"];
+  assert.equal(engine.artillery(1, { r: 4, c: 4, turnId: engine.turnId }).ok, true);
+  assert.equal(120 - engine.board[4][4].hp, rules.center);
+  assert.equal(120 - engine.board[4][5].hp, rules.outer);
+  assert.equal(120 - engine.board[3][3].hp, rules.outer, "友軍同樣受傷");
+
+  // UI 端不得自己抄 30 / 12
+  for (const [label, text] of [["alpha_ui.js", sharedUi], ["local_client.js", localClient],
+    ["alpha_client.js", client]]) {
+    assert.doesNotMatch(text, /\b30\b\s*:\s*\b12\b/, `${label} 不得硬寫炮擊傷害`);
+  }
+  assert.match(sharedUi, /rules\.center/);
+  assert.match(sharedUi, /rules\.outer/);
+  assert.ok(client.includes("state.artilleryRules"), "連線端必須用 server 送來的參數");
+  assert.match(localClient, /GameEngine\.artilleryRules\(\)/);
+});
+
+test("炮擊預覽會區分敵我並清乾淨", () => {
+  assert.match(sharedUi, /function forecastArtillery\(board, r, c, rules, selfPid\)/);
+  assert.match(sharedUi, /friendly: Boolean\(unit && unit\.pid === selfPid\)/);
+  assert.match(sharedUi, /dies: Boolean\(unit && unit\.hp - damage <= 0\)/);
+  // 敵我用不同樣式
+  assert.match(css, /\.artCell\.ally\s*\{/);
+  assert.match(css, /\.artCell\.foe\s*\{/);
+  // 移開瞄準格時統計要一起清掉，不能留著舊數字
+  assert.match(localClient, /if \(artilleryPlan\) \{ artilleryPlan = null; updateStatusText\(\); \}/);
+});

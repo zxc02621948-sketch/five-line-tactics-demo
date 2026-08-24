@@ -114,14 +114,27 @@
   // 已有棋子的格 → 它打誰、誰打它；空格 → 若把手上選的兵種放下去會發生什麼。
   // 觸控沒有 hover：點「已有棋子」的格子同樣會顯示（那格本來也不能部署，不衝突）。
   let hoverCell = null;
+  let artilleryPlan = null;              // 目前瞄準格的炮擊預測，供狀態列顯示
 
   function renderForecast() {
     const layer = $("#forecastLayer");
     const boardEl = $("#board");
     if (!layer || !boardEl || !engine) return;
     layer.innerHTML = "";
-    if (!hoverCell) return;
+    if (!hoverCell) {                        // 移開瞄準格時要把統計一起清掉
+      if (artilleryPlan) { artilleryPlan = null; updateStatusText(); }
+      return;
+    }
     const [r, c] = hoverCell;
+    if (artilleryMode) {                     // 炮擊模式：改畫 3×3 範圍與每格傷害
+      const plan = UI.forecastArtillery(engine.board, r, c,
+        GameEngine.artilleryRules(), engine.current);
+      UI.drawArtillery(layer, boardEl, plan);
+      artilleryPlan = plan;
+      updateStatusText();
+      return;
+    }
+    if (artilleryPlan) { artilleryPlan = null; updateStatusText(); }
     let ghost = null;
     if (!engine.board[r][c]) {
       if (!selectedType || !humanTurn()) return;
@@ -165,12 +178,7 @@
     $("#turnText").textContent = finished()
       ? winnerLabel
       : `第 ${engine.roundNo} 輪｜${owner} 行動｜${engine.actionsThisRound === 0 ? "先手" : "後手"}`;
-    $("#status").textContent = finished()
-      ? "按「重開」開始新的一局，或切換對戰模式。"
-      : artilleryMode ? "炮擊模式：點棋盤選擇 3×3 的中心格。"
-        : selectedType ? `已選 ${"★".repeat(selectedRank)}${NAMES[selectedType]}，點空格部署。`
-          : "先點手牌選擇兵種，再點棋盤空格部署。";
-    if (notice) $("#status").textContent += `\n${notice}`;
+    updateStatusText();
     $("#artilleryOverview").textContent =
       `炮擊資源｜P1：${engine.players[0].artillery} 發｜P2：${engine.players[1].artillery} 發`;
     const artilleryBtn = $("#artilleryBtn");
@@ -180,6 +188,20 @@
       || engine.artilleryUsedThisTurn || engine.deploymentCommitted;
     artilleryBtn.className = `btn artBtn ${artilleryMode ? "active" : "ready"}`;
     renderSessionControls();
+  }
+
+  // 狀態文字獨立出來：炮擊瞄準時 renderForecast 會算出命中統計，需要單獨刷新。
+  function updateStatusText() {
+    const text = finished()
+      ? "按「重開」開始新的一局，或切換對戰模式。"
+      : artilleryMode ? (artilleryPlan
+          ? `炮擊瞄準中：命中敵軍 ${artilleryPlan.enemies}、友軍 ${artilleryPlan.allies}`
+            + `｜預計擊殺 ${artilleryPlan.kills}、誤殺友軍 ${artilleryPlan.losses}`
+          : "炮擊模式：移到棋盤上可預覽 3×3 範圍與傷害。")
+        : selectedType ? `已選 ${"★".repeat(selectedRank)}${NAMES[selectedType]}，點空格部署。`
+          : "先點手牌選擇兵種，再點棋盤空格部署。";
+    $("#status").textContent = notice ? `${text}
+${notice}` : text;
   }
 
   // 對局進行中不顯示模式切換與重開，避免誤觸中斷戰鬥；改提供棄賽。
@@ -282,7 +304,7 @@
 
   // ---- 綁定 ----
   UI.wireRulesOverlay(catalog);
-  $("#artilleryBtn").onclick = () => { if (humanTurn()) { artilleryMode = !artilleryMode; render(); } };
+  $("#artilleryBtn").onclick = () => { if (humanTurn()) { artilleryMode = !artilleryMode; artilleryPlan = null; render(); } };
   $("#resetBtn").onclick = reset;
   $("#resignBtn").onclick = () => {
     if (!started() || finished()) return;

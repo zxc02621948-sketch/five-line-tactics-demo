@@ -201,6 +201,11 @@
     const board = state?.board;
     if (!hoverCell || !board) return;
     const [r, c] = hoverCell;
+    if (artilleryMode && state.artilleryRules) {
+      UI.drawArtillery(layer, boardEl,
+        UI.forecastArtillery(board, r, c, state.artilleryRules, selfPid));
+      return;
+    }
     let ghost = null;
     if (!board[r][c]) {
       const stats = globalThis.FiveLineEngine?.baseStats(selectedType, selectedRank);

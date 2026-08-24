@@ -231,3 +231,6 @@
 .fcChip.in { fill: #cfe8ff; }
 .fcDoom { fill: none; stroke: #ff5d5d; stroke-width: 3; stroke-dasharray: 5 4; }
 .fcCleave { stroke: #ffd43b; stroke-width: 3; stroke-dasharray: 2 6; stroke-linecap: round; }
+.artCell { fill: rgba(255, 212, 59, .12); stroke: #ffd43b; stroke-width: 2; }
+.artCell.foe { fill: rgba(255, 107, 107, .2); stroke: #ff8787; }
+.artCell.ally { fill: rgba(77, 171, 247, .22); stroke: #4dabf7; stroke-dasharray: 5 3; }

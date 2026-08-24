@@ -261,6 +261,63 @@
     }
   }
 
+  // ---- 炮擊預覽 ----
+  // 炮只有 2 發而且會誤傷自己，盲射代價太高。用引擎給的參數算出每格傷害與死亡預測。
+  function forecastArtillery(board, r, c, rules, selfPid) {
+    if (!board || !rules) return null;
+    const hits = [];
+    for (let rr = r - rules.radius; rr <= r + rules.radius; rr++) {
+      for (let cc = c - rules.radius; cc <= c + rules.radius; cc++) {
+        if (rr < 0 || cc < 0 || rr > 8 || cc > 8) continue;
+        const damage = rr === r && cc === c ? rules.center : rules.outer;
+        const unit = board[rr][cc];
+        hits.push({ r: rr, c: cc, damage, unit,
+          friendly: Boolean(unit && unit.pid === selfPid),
+          dies: Boolean(unit && unit.hp - damage <= 0) });
+      }
+    }
+    return {
+      hits,
+      enemies: hits.filter(h => h.unit && !h.friendly).length,
+      allies: hits.filter(h => h.friendly).length,
+      kills: hits.filter(h => h.dies && !h.friendly).length,
+      losses: hits.filter(h => h.dies && h.friendly).length,
+    };
+  }
+
+  function drawArtillery(layer, boardEl, plan) {
+    if (!layer || !boardEl) return;
+    layer.innerHTML = "";
+    const size = boardEl.clientWidth;
+    if (!size || !plan) return;
+    const cell = size / 9;
+    layer.setAttribute("viewBox", `0 0 ${size} ${size}`);
+    layer.style.width = `${size}px`;
+    layer.style.height = `${size}px`;
+    const rect = boardEl.getBoundingClientRect();
+    const wrap = layer.parentElement.getBoundingClientRect();
+    layer.style.left = `${rect.left - wrap.left + boardEl.clientLeft}px`;
+    layer.style.top = `${rect.top - wrap.top + boardEl.clientTop}px`;
+
+    const add = (tag, attrs, text) => {
+      const node = document.createElementNS(SVG_NS, tag);
+      for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+      if (text !== undefined) node.textContent = text;
+      layer.appendChild(node);
+    };
+    for (const hit of plan.hits) {
+      const x = hit.c * cell, y = hit.r * cell;
+      const kind = hit.friendly ? "ally" : hit.unit ? "foe" : "empty";
+      add("rect", { class: `artCell ${kind}`, x: x + 2, y: y + 2, width: cell - 4, height: cell - 4, rx: 6 });
+      if (!hit.unit) continue;
+      add("rect", { class: `fcChipBg ${hit.friendly ? "in" : "out"}`,
+        x: x + cell / 2 - 15, y: y + cell - 22, width: 30, height: 18, rx: 9 });
+      add("text", { class: `fcChip ${hit.friendly ? "in" : "out"}`,
+        x: x + cell / 2, y: y + cell - 8.5 }, `-${hit.damage}`);
+      if (hit.dies) add("rect", { class: "fcDoom", x: x + 2, y: y + 2, width: cell - 4, height: cell - 4, rx: 6 });
+    }
+  }
+
   // 大卡詳情：沒有目標時整張卡隱藏（.idle），有目標才浮出。
   // 因為 .cardDetail 是 absolute，出現與消失都不會推擠版面。
   function renderCardDetail(box, type, catalog) {
@@ -291,6 +348,6 @@
   globalThis.AlphaUI = {
     ICONS, NAMES, SHORT_TAG, ELITE_TAG, ABILITY, ELITE_ABILITY,
     handCardHtml, unitHtml, unitTitle, cardDetailHtml, renderCardDetail, rulesHtml, wireRulesOverlay,
-    autoSizeBoard, forecast, focusOn, drawForecast,
+    autoSizeBoard, forecast, focusOn, drawForecast, forecastArtillery, drawArtillery,
   };
 })();

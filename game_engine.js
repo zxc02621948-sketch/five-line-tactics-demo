@@ -652,6 +652,11 @@ class GameEngine {
     return catalog;
   }
 
+  // 純顯示用：炮擊的實際參數，讓 UI 不必自己抄一份數值。
+  static artilleryRules() {
+    return { perPlayer: 2, radius: 1, center: 30, outer: 12, friendlyFire: true };
+  }
+
   visibleStateFor(pid) {
     const own = this.players[pid - 1];
     const opponent = this.players[pid === 1 ? 1 : 0];
@@ -682,6 +687,7 @@ class GameEngine {
       startingPlayer: this.startingPlayer,
       turnOrderMode: this.turnOrderMode,
       unitCatalog: GameEngine.unitCatalog(),
+      artilleryRules: GameEngine.artilleryRules(),
       eliteCardCost: cardCost(2),
       deathCooldownRounds: 3,
       actionsThisRound: this.actionsThisRound,
@@ -707,6 +713,7 @@ class GameEngine {
         board: "9x9",
         turnOrderMode: this.turnOrderMode,
       unitCatalog: GameEngine.unitCatalog(),
+      artilleryRules: GameEngine.artilleryRules(),
       eliteCardCost: cardCost(2),
       deathCooldownRounds: 3,
         deck: { sword: 9, shield: 9, spear: 7 },
