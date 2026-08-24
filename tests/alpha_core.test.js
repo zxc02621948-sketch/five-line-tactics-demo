@@ -411,3 +411,66 @@ test("29 ★★劍自己的 main attack 親自致死 → 斬入（即使友軍�
   assert.equal(result.cleaves[0].followUp.damage, 30, "追擊 24 × 劍剋槍1.25 = 30，不套決鬥");
   assert.equal(hpOf(behind), 120 - 30);
 });
+
+/* ---------------- 正式回合順序：固定 P1 → P2 → combat ---------------- */
+
+test("30 連續三回合都是 P1 → P2 → combat，先行者不交替", () => {
+  const { ALPHA_TURN_ORDER } = require("../game_engine");
+  assert.deepEqual(ALPHA_TURN_ORDER, { turnOrderMode: "fixed", startingPlayer: 1 });
+
+  const engine = new GameEngine({ randomInt: () => 0, ...ALPHA_TURN_ORDER });
+  const order = [];
+  for (let round = 1; round <= 3; round++) {
+    assert.equal(engine.roundNo, round);
+    assert.equal(engine.firstPlayerForRound(round), 1, `第 ${round} 輪必須由 P1 先行`);
+
+    engine.players[0].hand = Array(5).fill("sword");
+    engine.players[1].hand = Array(5).fill("shield");
+    const combatBefore = engine.combatResolutionCount;
+
+    assert.equal(engine.current, 1, `第 ${round} 輪應由 P1 開始`);
+    order.push(engine.current);
+    assert.equal(engine.deploy(1, intent(engine, { r: 0, c: round - 1, type: "sword", rank: 1 })).ok, true);
+    assert.equal(engine.combatResolutionCount, combatBefore, "P1 部署後不得結算");
+
+    assert.equal(engine.current, 2, `第 ${round} 輪 P1 之後應輪到 P2`);
+    order.push(engine.current);
+    assert.equal(engine.deploy(2, intent(engine, { r: 8, c: round - 1, type: "shield", rank: 1 })).ok, true);
+    assert.equal(engine.combatResolutionCount, combatBefore + 1, "雙方行動後才結算一次");
+  }
+  assert.deepEqual(order, [1, 2, 1, 2, 1, 2]);
+  assert.deepEqual(engine.roundRecords.map(record => record.firstPlayer), [1, 1, 1, 1]);
+});
+
+test("31 沒有任何玩家能跨回合取得連續兩次部署", () => {
+  const { ALPHA_TURN_ORDER } = require("../game_engine");
+  const engine = new GameEngine({ randomInt: () => 0, ...ALPHA_TURN_ORDER });
+  const actors = [];
+  for (let round = 1; round <= 4; round++) {
+    engine.players[0].hand = Array(5).fill("sword");
+    engine.players[1].hand = Array(5).fill("shield");
+    for (const pid of [1, 2]) {
+      actors.push(engine.current);
+      const row = pid === 1 ? 0 : 8;
+      assert.equal(engine.deploy(pid, intent(engine, { r: row, c: round - 1, type: pid === 1 ? "sword" : "shield", rank: 1 })).ok, true);
+    }
+  }
+  // 相鄰兩次部署永遠是不同玩家，代表沒有任何人拿到連續兩次窗口
+  for (let i = 1; i < actors.length; i++) {
+    assert.notEqual(actors[i], actors[i - 1], `第 ${i} 與第 ${i + 1} 次部署不得由同一位玩家連續進行`);
+  }
+  assert.deepEqual(actors, [1, 2, 1, 2, 1, 2, 1, 2]);
+});
+
+test("32 /local 與正式連線建房使用同一組回合順序設定", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const read = name => fs.readFileSync(path.join(__dirname, "..", name), "utf8");
+  // 單機直接套用 ALPHA_TURN_ORDER
+  assert.match(read("local_client.js"), /new GameEngine\(\{ roomCode: "LOCAL1", \.\.\.ALPHA_TURN_ORDER \}\)/);
+  // 連線建房預設 fixed，只有明確要求才會是 alternating
+  assert.match(read("server.js"), /rawMode === "alternating" \? "alternating" : "fixed"/);
+  assert.match(read("server.js"), /startingPlayer: room\.mode === "fixed" \? ALPHA_TURN_ORDER\.startingPlayer : undefined/);
+  // 一般入口不會送出 alternating
+  assert.match(read("alpha_client.js"), /get\("turnOrder"\) === "alternating" \? "alternating" : "fixed"/);
+});

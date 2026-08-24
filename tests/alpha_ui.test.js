@@ -90,7 +90,7 @@ test("/local 不再含★★★，全站也不出現", () => {
 });
 
 test("/local 不再自己實作規則，只呼叫正式引擎", () => {
-  assert.match(localClient, /const \{ GameEngine \} = globalThis\.FiveLineEngine;/);
+  assert.match(localClient, /globalThis\.FiveLineEngine/);
   // 不得複製兵種數值表或結算邏輯
   assert.doesNotMatch(localClient, /hp:\s*120|hp:\s*160|atk:\s*24|atk:\s*20/);
   assert.doesNotMatch(localClient, /function resolveCombat|counterBonus|hpMultiplier/);

@@ -74,7 +74,10 @@ test("two sessions synchronize, preserve privacy, reject illegal actions, win, a
   assert.equal(p1State.opponent.handCount, p2State.own.hand.length);
   assert.equal(p1State.cardDistribution.P1.total, 25);
   assert.equal(p1State.cardDistribution.P2.total, 25);
-  assert.equal(p1State.turnOrderMode, "alternating");
+  // 正式建房一律是 Alpha Core 的固定 P1 → P2
+  assert.equal(p1State.turnOrderMode, "fixed");
+  assert.equal(p1State.startingPlayer, 1);
+  assert.equal(p1State.firstPlayer, 1);
 
   const fixedP1 = client(url), fixedP2 = client(url);
   await Promise.all([fixedP1.open(), fixedP2.open()]);

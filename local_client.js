@@ -1,7 +1,7 @@
 // /local 單機測試。規則完全來自正式的 game_engine.js，這裡只做操作與顯示。
 // 兩種模式維持原本用途：對電腦（P2 由簡單啟發式代打）與本機雙人（同一台電腦輪流操作）。
 (() => {
-  const { GameEngine } = globalThis.FiveLineEngine;
+  const { GameEngine, ALPHA_TURN_ORDER } = globalThis.FiveLineEngine;
   const UI = globalThis.AlphaUI;
   const { NAMES } = UI;
   const $ = selector => document.querySelector(selector);
@@ -23,7 +23,8 @@
     && (mode === "pvp" || engine.current === 1);
 
   function reset() {
-    engine = new GameEngine({ roomCode: "LOCAL1" });
+    // 對電腦與本機雙人都使用正式回合順序：固定 P1 → P2 → combat
+    engine = new GameEngine({ roomCode: "LOCAL1", ...ALPHA_TURN_ORDER });
     selectedType = null; selectedRank = 1; hoverType = null;
     artilleryMode = false; notice = ""; aiThinking = false;
     render();

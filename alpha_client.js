@@ -5,11 +5,14 @@
   const boardEl = $("#board");
   const handEl = $("#hand");
   const logEl = $("#log");
-  const requestedMode = location.pathname.endsWith("alpha-fixed.html") ? "fixed" : "alternating";
-  if (requestedMode === "fixed") {
-    document.title = "五連戰線｜固定順序實驗";
-    $("h1").textContent = "五連戰線｜固定順序實驗";
-    $("#createBtn").textContent = "建立固定順序房間";
+  // 正式 Alpha 一律固定 P1 → P2 → combat。alternating 只保留給開發測試，
+  // 必須明確在網址加上 ?turnOrder=alternating 才會啟用，一般入口不會碰到。
+  const requestedMode =
+    new URLSearchParams(location.search).get("turnOrder") === "alternating" ? "alternating" : "fixed";
+  if (requestedMode === "alternating") {
+    document.title = "五連戰線｜交替先手（開發測試）";
+    $("h1").textContent = "五連戰線｜交替先手（開發測試）";
+    $("#createBtn").textContent = "建立交替先手房間（非正式規則）";
   }
   let socket;
   let connected = false;
@@ -201,7 +204,7 @@
     $("#socketStatus").className = `connection ${connected ? "ok" : "bad"}`;
     $("#createBtn").disabled = !connected;
     $("#joinBtn").disabled = !connected;
-    const modeLabel = state?.turnOrderMode === "fixed" || requestedMode === "fixed" ? "｜固定順序實驗" : "";
+    const modeLabel = (state?.turnOrderMode || requestedMode) === "alternating" ? "｜交替先手（開發測試）" : "";
     $("#roomIdentity").textContent = roomCode ? `房號 ${roomCode}｜你是 P${selfPid}${modeLabel}` : "";
     $("#copyRoomBtn").classList.toggle("hidden", !roomCode);
     // 重連成功後直接進遊戲，不要再擋一層入口畫面

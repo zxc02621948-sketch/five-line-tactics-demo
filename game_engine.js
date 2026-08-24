@@ -62,6 +62,11 @@ function eliteOnBoard(board, pid, type) {
   return false;
 }
 
+// Alpha Core v1 的正式回合順序：每個完整回合固定 P1 → P2 → combat，先行者不交替。
+// 交替先行會讓某一方取得「上一輪最後部署 ＋ 下一輪第一部署」的連續兩次部署窗口，
+// 那不是正式規則。所有正式入口一律套用這組設定；alternating 只保留給開發測試。
+const ALPHA_TURN_ORDER = Object.freeze({ turnOrderMode: "fixed", startingPlayer: 1 });
+
 function counterBonus(attacker, defender) {
   if (COUNTER[attacker.type] !== defender.type) return 0;
   return attacker.type === "spear" && defender.type === "shield" ? 0.5 : 0.25;
@@ -730,6 +735,6 @@ class GameEngine {
   }
 }
 
-const FiveLineEngine = { GameEngine, TYPES, DECK_TEMPLATE, baseStats, cardCost };
+const FiveLineEngine = { GameEngine, TYPES, DECK_TEMPLATE, baseStats, cardCost, ALPHA_TURN_ORDER };
 if (typeof module !== "undefined" && module.exports) module.exports = FiveLineEngine;
 if (typeof globalThis !== "undefined") globalThis.FiveLineEngine = FiveLineEngine;

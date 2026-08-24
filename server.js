@@ -4,7 +4,7 @@ const path = require("path");
 const crypto = require("crypto");
 const os = require("os");
 const { WebSocketServer, WebSocket } = require("ws");
-const { GameEngine } = require("./game_engine");
+const { GameEngine, ALPHA_TURN_ORDER } = require("./game_engine");
 
 const HOST = process.env.HOST || "0.0.0.0";
 const PORT = Number(process.env.PORT || 3000);
@@ -86,7 +86,12 @@ function broadcastRoom(room) {
 
 function maybeStart(room) {
   if (!room.game && room.players[1]?.connected && room.players[2]?.connected) {
-    room.game = new GameEngine({ matchId: crypto.randomUUID(), roomCode: room.code, turnOrderMode: room.mode });
+    room.game = new GameEngine({
+      matchId: crypto.randomUUID(),
+      roomCode: room.code,
+      turnOrderMode: room.mode,
+      startingPlayer: room.mode === "fixed" ? ALPHA_TURN_ORDER.startingPlayer : undefined,
+    });
     room.startedAt = Date.now();
   }
   broadcastRoom(room);
@@ -132,7 +137,8 @@ function createRoom(ws, rawMode) {
   const code = roomCode();
   const room = {
     code,
-    mode: rawMode === "fixed" ? "fixed" : "alternating",
+    // 正式 Alpha 一律固定 P1 → P2；alternating 只在開發測試明確要求時才使用。
+    mode: rawMode === "alternating" ? "alternating" : "fixed",
     players: { 1: newSeat(1, ws), 2: null },
     game: null,
     createdAt: Date.now(),
