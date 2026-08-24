@@ -107,6 +107,10 @@
 }
 
 /* ---- 入口 / 規則 / 卡牌詳情（Alpha UX） ---- */
+/* .hidden 必須定義在共用樣式裡：alpha.html 有自己的內嵌 style，
+   index.html 沒有，少了這條會讓規則視窗關不掉。 */
+.hidden { display: none !important; }
+
 .counterHint { color: #edf2f7; letter-spacing: .5px; }
 .counterHint b { color: #ffd43b; font-weight: 700; }
 .helpBtn { margin-left: auto; }

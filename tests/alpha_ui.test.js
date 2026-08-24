@@ -302,3 +302,18 @@ test("engine 提供權威數值給 UI，前端不自行硬編數值", () => {
   assert.equal(state.deathCooldownRounds, 3);
   assert.match(client, /state && state\.unitCatalog/);
 });
+
+test("兩個頁面都能真的隱藏 overlay：.hidden 必須來自共用樣式", () => {
+  // index.html 沒有自己的 .hidden，只靠 alpha_board.css；少了這條規則
+  // 規則視窗會一進頁面就展開而且關不掉。
+  assert.match(css, /^\.hidden\s*\{[^}]*display:\s*none/m, "alpha_board.css 必須定義 .hidden");
+  for (const [label, page] of [["alpha.html", html], ["index.html", localHtml]]) {
+    assert.match(page, /<link rel="stylesheet" href="\/alpha_board\.css">/, `${label} 必須載入共用樣式`);
+    assert.match(page, /id="rulesOverlay"[^>]*class="overlay hidden"/, `${label} 的規則視窗預設應為隱藏`);
+    assert.match(page, /id="rulesCloseBtn"/, `${label} 缺少關閉按鈕`);
+  }
+  // 開關確實是靠 .hidden 這個 class
+  const wiring = sharedUi.match(/function wireRulesOverlay\(getCatalog\)[\s\S]*?\n  }/)[0];
+  assert.match(wiring, /classList\.add\("hidden"\)/);
+  assert.match(wiring, /classList\.remove\("hidden"\)/);
+});
