@@ -5,6 +5,12 @@
   const boardEl = $("#board");
   const handEl = $("#hand");
   const logEl = $("#log");
+  const requestedMode = location.pathname.endsWith("alpha-fixed.html") ? "fixed" : "alternating";
+  if (requestedMode === "fixed") {
+    document.title = "五連戰線｜固定順序實驗";
+    $("h1").textContent = "五連戰線｜固定順序實驗";
+    $("#createBtn").textContent = "建立固定順序房間";
+  }
   let socket;
   let connected = false;
   let roomCode = null;
@@ -18,7 +24,7 @@
   let pendingRequest = false;
   let notice = "";
 
-  function sessionKey() { return "five-line-alpha-session"; }
+  function sessionKey() { return `five-line-alpha-session-${requestedMode}`; }
   function saveSession(message) {
     localStorage.setItem(sessionKey(), JSON.stringify({ roomCode: message.roomCode, token: message.token, pid: message.pid }));
   }
@@ -110,7 +116,7 @@
       if (unit) {
         const div = document.createElement("div");
         div.className = `unit p${unit.pid}`;
-        div.innerHTML = `<span class="stars">${"★".repeat(unit.rank)}</span>${ICONS[unit.type]}<small>${Math.max(0, Math.round(unit.hp))}/${unit.maxHp}</small><span class="hpbar"><i style="width:${Math.max(0, Math.min(100, unit.hp / unit.maxHp * 100))}%"></i></span>`;
+        div.innerHTML = `<span class="stars">${"★".repeat(unit.rank)}</span><span class="unitIcon">${ICONS[unit.type]}</span><small>${Math.max(0, Math.round(unit.hp))}/${unit.maxHp}</small><span class="hpbar"><i style="width:${Math.max(0, Math.min(100, unit.hp / unit.maxHp * 100))}%"></i></span>`;
         div.title = `P${unit.pid} ${NAMES[unit.type]} ${"★".repeat(unit.rank)}｜HP ${Math.round(unit.hp)}/${unit.maxHp}｜攻 ${unit.atk}`;
         cell.appendChild(div);
       }
@@ -140,14 +146,22 @@
     $("#handTitle").textContent = `你是 P${selfPid}｜自己的手牌（${state.own.hand.length}/5）`;
     $("#deckInfo").textContent = `自己的牌庫 ${state.own.deckCount}｜冷卻 ${state.own.cooldown.map(item => `${NAMES[item.type]}:${item.turns}`).join("、") || "無"}`;
     if (selectedType) {
-      for (const [rank, cost] of [[1, 1], [2, 3], [3, 5]]) {
+      // ★★★ 已停用；★★ 每兵種同時只能有一隻在場。
+      const eliteOut = state.board.flat()
+        .some(unit => unit && unit.pid === selfPid && unit.rank === 2 && unit.type === selectedType);
+      for (const [rank, cost] of [[1, 1], [2, 3]]) {
         const button = document.createElement("button");
+        const capped = rank === 2 && eliteOut;
         button.className = `btn ${selectedRank === rank ? "active" : ""}`;
-        button.textContent = `${"★".repeat(rank)}（${cost}張）`;
-        button.disabled = !ownTurn() || counts[selectedType] < cost;
+        button.textContent = capped
+          ? `★★（場上已有${NAMES[selectedType]}）`
+          : `${"★".repeat(rank)}（${cost}張）`;
+        button.disabled = !ownTurn() || counts[selectedType] < cost || capped;
+        button.title = capped ? "同兵種★★同時只能有一隻，等它陣亡後才能再合成" : "";
         button.onclick = () => { selectedRank = rank; render(); };
         $("#rankRow").appendChild(button);
       }
+      if (selectedRank === 2 && eliteOut) selectedRank = 1;   // 被上限擋下時自動退回★，不卡住行動
     }
   }
 
@@ -166,7 +180,8 @@
     $("#socketStatus").className = `connection ${connected ? "ok" : "bad"}`;
     $("#createBtn").disabled = !connected;
     $("#joinBtn").disabled = !connected;
-    $("#roomIdentity").textContent = roomCode ? `房號 ${roomCode}｜你是 P${selfPid}` : "";
+    const modeLabel = state?.turnOrderMode === "fixed" || requestedMode === "fixed" ? "｜固定順序實驗" : "";
+    $("#roomIdentity").textContent = roomCode ? `房號 ${roomCode}｜你是 P${selfPid}${modeLabel}` : "";
 
     const statusTexts = {
       none: "尚未建立或加入房間。",
@@ -188,7 +203,7 @@
       $("#privacyInfo").textContent = "自己的手牌會顯示在左側；對手只能看到手牌數量。";
       return;
     }
-    $("#turnText").textContent = `第 ${state.roundNo} 輪｜P${state.firstPlayer} 先行｜現在 P${state.current}`;
+    $("#turnText").textContent = `第 ${state.roundNo} 輪｜P${state.firstPlayer} 先行｜現在 P${state.current}${state.turnOrderMode === "fixed" ? "｜本局固定順序" : ""}`;
     $("#turnStatus").textContent = state.gameOver
       ? state.winner === "draw" ? "雙方同時五連：平手" : `P${state.winner} 獲勝`
       : !opponentConnected ? "對手已斷線，等待重連"
@@ -213,7 +228,7 @@
     } else summarySection.classList.add("hidden");
   }
 
-  $("#createBtn").onclick = () => { localStorage.removeItem(sessionKey()); send({ type: "create_room" }); };
+  $("#createBtn").onclick = () => { localStorage.removeItem(sessionKey()); send({ type: "create_room", mode: requestedMode }); };
   $("#joinBtn").onclick = () => {
     localStorage.removeItem(sessionKey());
     send({ type: "join_room", roomCode: $("#roomInput").value.trim().toUpperCase() });

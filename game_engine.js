@@ -19,15 +19,25 @@ function inBounds(r, c) {
   return Number.isInteger(r) && Number.isInteger(c) && r >= 0 && c >= 0 && r < N && c < N;
 }
 
+// ★★菁英：HP = ★ 的 1.5 倍，ATK = ★ 的 1 倍（不再有通用二星攻擊加成）。
+// ★★★ 已停用，baseStats 與 cardCost 都不再承認 rank 3。
 function baseStats(type, rank) {
   const base = TYPES[type];
-  const hpMultiplier = rank === 1 ? 1 : rank === 2 ? 3 : 5;
-  const attackMultiplier = rank === 1 ? 1 : rank === 2 ? 2 : 3;
-  return { maxHp: base.hp * hpMultiplier, atk: base.atk * attackMultiplier };
+  if (rank !== 1 && rank !== 2) return null;
+  const hpMultiplier = rank === 2 ? 1.5 : 1;
+  return { maxHp: Math.round(base.hp * hpMultiplier), atk: base.atk };
 }
 
 function cardCost(rank) {
-  return rank === 1 ? 1 : rank === 2 ? 3 : rank === 3 ? 5 : 0;
+  return rank === 1 ? 1 : rank === 2 ? 3 : 0;
+}
+
+// 每位玩家、每個兵種同時只能有 1 隻 ★★ 在場（各兵種獨立計算）。
+function eliteOnBoard(board, pid, type) {
+  for (const row of board) for (const unit of row) {
+    if (unit && unit.pid === pid && unit.rank === 2 && unit.type === type) return true;
+  }
+  return false;
 }
 
 function counterBonus(attacker, defender) {
@@ -36,13 +46,17 @@ function counterBonus(attacker, defender) {
 }
 
 class GameEngine {
-  constructor({ matchId, roomCode, randomInt } = {}) {
+  constructor({ matchId, roomCode, randomInt, turnOrderMode = "alternating", startingPlayer } = {}) {
     this.matchId = matchId || crypto.randomUUID();
     this.roomCode = roomCode || "TEST00";
     this.randomInt = randomInt || (max => crypto.randomInt(max));
+    this.turnOrderMode = turnOrderMode === "fixed" ? "fixed" : "alternating";
+    this.startingPlayer = this.turnOrderMode === "fixed"
+      ? (startingPlayer === 1 || startingPlayer === 2 ? startingPlayer : this.randomInt(2) + 1)
+      : 1;
     this.board = Array.from({ length: N }, () => Array(N).fill(null));
     this.players = [this.newPlayer(1), this.newPlayer(2)];
-    this.current = 1;
+    this.current = this.startingPlayer;
     this.turnId = 1;
     this.roundNo = 1;
     this.actionsThisRound = 0;
@@ -61,7 +75,7 @@ class GameEngine {
     this.drawToFive(1);
     this.drawToFive(2);
     this.ensureRoundRecord();
-    this.addLog("sys", "遊戲開始。第一輪由 P1 先行；每輪完成雙方部署後由伺服器同步結算戰鬥。");
+    this.addLog("sys", `遊戲開始。第一輪由 P${this.startingPlayer} 先行；每輪完成雙方部署後由伺服器同步結算戰鬥。`);
     this.auditCardConservation("game_start");
   }
 
@@ -88,12 +102,16 @@ class GameEngine {
     this.logs.push({ index: this.logs.length + 1, round: this.roundNo, kind, text, data });
   }
 
+  firstPlayerForRound(round = this.roundNo) {
+    return this.turnOrderMode === "fixed" ? this.startingPlayer : round % 2 === 1 ? 1 : 2;
+  }
+
   ensureRoundRecord() {
     let record = this.roundRecords.find(item => item.round === this.roundNo);
     if (!record) {
       record = {
         round: this.roundNo,
-        firstPlayer: this.roundNo % 2 === 1 ? 1 : 2,
+        firstPlayer: this.firstPlayerForRound(),
         actions: [],
         combat: null,
       };
@@ -182,8 +200,12 @@ class GameEngine {
     if (!inBounds(r, c)) return { ok: false, error: "部署位置超出棋盤" };
     if (this.board[r][c]) return { ok: false, error: "該棋格已有單位" };
     if (!Object.hasOwn(TYPES, type)) return { ok: false, error: "不存在的兵種" };
+    if (rank !== 1 && rank !== 2) return { ok: false, error: "★★★已停用，只能部署 ★ 或 ★★" };
     const cost = cardCost(rank);
     if (!cost) return { ok: false, error: "無效星級" };
+    if (rank === 2 && eliteOnBoard(this.board, pid, type)) {
+      return { ok: false, error: `場上已有 ★★${TYPES[type].name}，同兵種同時只能有一隻` };
+    }
     if (this.players[pid - 1].hand.filter(card => card === type).length < cost) {
       return { ok: false, error: "手牌中沒有足夠的指定兵種" };
     }
@@ -268,6 +290,8 @@ class GameEngine {
 
   attackTargets(r, c, unit) {
     const result = [];
+    // ★★盾是純防禦型菁英，完全不主動攻擊。
+    if (unit.type === "shield" && unit.rank === 2) return result;
     if (unit.type === "spear") {
       for (const [dr, dc] of ORTHOGONAL) {
         for (let distance = 1; distance <= 2; distance++) {
@@ -276,7 +300,8 @@ class GameEngine {
           const target = this.board[rr][cc];
           if (target) {
             if (target.pid !== unit.pid) result.push([rr, cc, distance]);
-            break;
+            // ★★槍可穿過第一格（無論敵我），★槍照舊被任何佔用格阻擋。
+            if (unit.rank !== 2) break;
           }
         }
       }
@@ -301,7 +326,12 @@ class GameEngine {
       if (!targets.length) continue;
       let total = attacker.atk;
       if (attacker.type === "sword" && targets.length === 1) total *= 1.5;
-      const split = total / targets.length;
+      // 槍：ATK 只依「存在合法敵方目標的正交方向數」平均分配，同方向多個受擊者不增加分母。
+      // 其他兵種維持依目標數平分。
+      const denominator = attacker.type === "spear"
+        ? new Set(targets.map(([tr, tc]) => `${Math.sign(tr - r)},${Math.sign(tc - c)}`)).size
+        : targets.length;
+      const split = total / denominator;
       for (const [tr, tc, distance] of targets) {
         const defender = this.board[tr][tc];
         let amount = split;
@@ -317,10 +347,18 @@ class GameEngine {
       }
     }
 
+    // ---- 護衛轉移：非盾友軍受傷時，50% 轉給正交相鄰的盾（多盾分攤，總轉移不超過 50%）----
     const incoming = new Map();
+    const rawSources = new Map();                 // cellKey -> Map(sourceUnitId -> 原始傷害)
+    const addSource = (key, sourceId, value) => {
+      if (!rawSources.has(key)) rawSources.set(key, new Map());
+      const m = rawSources.get(key);
+      m.set(sourceId, (m.get(sourceId) || 0) + value);
+    };
     for (const packet of packets) {
       const key = `${packet.to.r},${packet.to.c}`;
       incoming.set(key, (incoming.get(key) || 0) + packet.amount);
+      addSource(key, packet.from.unitId, packet.amount);
     }
     const finalDamage = new Map(incoming);
     const redirected = new Map();
@@ -338,33 +376,138 @@ class GameEngine {
       if (guards.length) {
         finalDamage.set(key, amount * 0.5);
         guardsByTarget.set(key, guards.map(([gr, gc]) => ({ r: gr, c: gc, unitId: this.board[gr][gc].id })));
+        const sources = rawSources.get(key) || new Map();
         for (const [gr, gc] of guards) {
           const guardKey = `${gr},${gc}`;
           redirected.set(guardKey, (redirected.get(guardKey) || 0) + amount * 0.5 / guards.length);
+          // 轉移到盾身上的那一份，來源仍記在原攻擊者頭上（供反震歸因）
+          for (const [srcId, value] of sources) addSource(guardKey, srcId, value * 0.5 / guards.length);
         }
+        // 被護衛者身上只留下一半，來源份額同步減半
+        for (const [srcId, value] of sources) sources.set(srcId, value * 0.5);
       }
     }
     for (const [key, amount] of redirected) finalDamage.set(key, (finalDamage.get(key) || 0) + amount);
 
+    // ---- 套用主戰鬥傷害。反震以「盾真正扣掉的 HP」為準，不計 overkill ----
     const damageResults = [];
+    const reflectLedger = new Map();               // ★★盾 unitId -> Map(sourceUnitId -> 實際承受傷害)
+    const noteReflect = (shieldId, sourceId, value) => {
+      if (value <= 0) return;
+      if (!reflectLedger.has(shieldId)) reflectLedger.set(shieldId, new Map());
+      const m = reflectLedger.get(shieldId);
+      m.set(sourceId, (m.get(sourceId) || 0) + value);
+    };
+    const applyDamage = (unit, rawAmount, sources) => {
+      const damage = Math.round(rawAmount);
+      const actual = Math.min(Math.max(0, unit.hp), damage);
+      unit.hp -= damage;
+      if (unit.type === "shield" && unit.rank === 2 && actual > 0 && sources && sources.size) {
+        const total = [...sources.values()].reduce((sum, v) => sum + v, 0);
+        if (total > 0) for (const [srcId, value] of sources) noteReflect(unit.id, srcId, actual * value / total);
+      }
+      return { damage, actual };
+    };
+    const hpBefore = new Map();                    // unitId -> 本次結算前的 HP
     for (const [key, amount] of finalDamage) {
       const [r, c] = key.split(",").map(Number);
       const unit = this.board[r][c];
       if (!unit) continue;
-      const damage = Math.round(amount * (unit.type === "shield" ? 0.75 : 1));
-      unit.hp -= damage;
-      damageResults.push({ r, c, unitId: unit.id, pid: unit.pid, type: unit.type, damage, hpAfter: unit.hp });
+      hpBefore.set(unit.id, unit.hp);
+      // 盾的耐久只由高 HP 表現，不再額外減傷。
+      const { damage, actual } = applyDamage(unit, amount, rawSources.get(key));
+      damageResults.push({ r, c, unitId: unit.id, pid: unit.pid, type: unit.type, damage, actualDamage: actual, hpAfter: unit.hp });
     }
     const deaths = [];
     this.removeDead("combat", deaths);
+
+    // ---- 階段 2：★★劍 斬入 ＋ 追擊 ----
+    const cleaves = this.resolveCleaves(deaths, applyDamage, rawSources, hpBefore);
+    if (cleaves.length) this.removeDead("combat", deaths);
+
+    // ---- 階段 3：★★盾 100% 反震（不再觸發反震、不再觸發護衛）----
+    const reflections = [];
+    // ★★盾即使因本次主戰鬥陣亡，已記錄的實際承傷仍照常反震（不丟棄 ledger）。
+    for (const [shieldId, sources] of reflectLedger) {
+      for (const [srcId, value] of sources) {
+        const pos = this.findUnitById(srcId);
+        if (!pos) continue;
+        const attacker = this.board[pos[0]][pos[1]];
+        const damage = Math.round(value);
+        if (damage <= 0) continue;
+        attacker.hp -= damage;
+        reflections.push({ shieldId, r: pos[0], c: pos[1], unitId: srcId, damage, hpAfter: attacker.hp });
+      }
+    }
+    if (reflections.length) this.removeDead("combat", deaths);
+
     const result = {
       packets,
       guards: Object.fromEntries(guardsByTarget),
       damage: damageResults,
+      cleaves,
+      reflections,
       deaths,
     };
     this.addLog("sys", packets.length ? `同步戰鬥：${packets.length} 條攻擊關係，由伺服器結算一次。` : "本輪沒有交戰。", result);
     return result;
+  }
+
+  findUnitById(id) {
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+      if (this.board[r][c] && this.board[r][c].id === id) return [r, c];
+    }
+    return null;
+  }
+
+  // ★★劍 斬入：主戰鬥中親自擊殺自己的攻擊目標 → 強制移動到死亡格 → 對新位置正交相鄰
+  // 敵人中 HP 最低者追擊一次（100% base ATK，套互剋，不套決鬥加成）。
+  // 每次結算每隻 ★★劍最多一次；追擊擊殺不得再次斬入；主戰鬥已陣亡者不得斬入。
+  resolveCleaves(deaths, applyDamage, rawSources, hpBefore) {
+    const log = [];
+    for (let sr = 0; sr < N; sr++) for (let sc = 0; sc < N; sc++) {
+      const sword = this.board[sr][sc];
+      if (!sword || sword.rank !== 2 || sword.type !== "sword") continue;   // 已陣亡者不在盤上
+      // 「親自擊殺」＝ ★★劍自己的 main attack 落在該目標上的傷害，單獨就足以把它從
+      // 結算前的 HP 打到 0。友軍共同補刀致死不算，即使 ★★劍是最高貢獻者也不觸發。
+      const killedByMe = deaths.filter(d => {
+        if (d.cause !== "combat" || d.unit.pid === sword.pid) return false;
+        const sources = rawSources.get(`${d.r},${d.c}`);
+        const own = sources && sources.get(sword.id);
+        if (!own) return false;
+        const before = hpBefore.get(d.unit.id);
+        return before !== undefined && Math.round(own) >= before;
+      });
+      if (!killedByMe.length) continue;
+      let dest = null;
+      for (const [dr, dc] of ORTHOGONAL) {          // 多重擊殺時用固定方向順序，維持 deterministic
+        const rr = sr + dr, cc = sc + dc;
+        if (killedByMe.some(d => d.r === rr && d.c === cc) && !this.board[rr][cc]) { dest = [rr, cc]; break; }
+      }
+      if (!dest) continue;
+      this.board[sr][sc] = null;
+      this.board[dest[0]][dest[1]] = sword;
+      const foes = [];
+      for (const [dr, dc] of ORTHOGONAL) {
+        const rr = dest[0] + dr, cc = dest[1] + dc;
+        const foe = inBounds(rr, cc) && this.board[rr][cc];
+        if (foe && foe.pid !== sword.pid) foes.push([rr, cc, foe]);
+      }
+      const entry = { unitId: sword.id, pid: sword.pid, from: { r: sr, c: sc }, to: { r: dest[0], c: dest[1] }, followUp: null };
+      if (foes.length) {
+        foes.sort((a, b) => a[2].hp - b[2].hp);     // HP 最低優先，同 HP 用固定方向順序
+        const [tr, tc, target] = foes[0];
+        const amount = TYPES[sword.type].atk * (1 + counterBonus(sword, target));
+        const sources = new Map([[sword.id, amount]]);
+        const { damage, actual } = applyDamage(target, amount, sources);
+        entry.followUp = { r: tr, c: tc, unitId: target.id, damage, actualDamage: actual, hpAfter: target.hp };
+      }
+      log.push(entry);
+      this.addLog(sword.pid === 1 ? "r" : "b",
+        `P${sword.pid} ★★劍 斬入 (${sr + 1},${sc + 1})→(${dest[0] + 1},${dest[1] + 1})`
+        + (entry.followUp ? `，追擊 (${entry.followUp.r + 1},${entry.followUp.c + 1}) ${entry.followUp.damage}` : "，無追擊目標"), entry);
+    }
+    return log;
   }
 
   removeDead(cause, deaths) {
@@ -456,7 +599,7 @@ class GameEngine {
 
     this.roundNo++;
     this.actionsThisRound = 0;
-    this.current = this.roundNo % 2 === 1 ? 1 : 2;
+    this.current = this.firstPlayerForRound();
     this.artilleryUsedThisTurn = false;
     this.deploymentCommitted = false;
     this.ownerTurnStart(this.current);
@@ -491,7 +634,9 @@ class GameEngine {
       roundNo: this.roundNo,
       current: this.current,
       turnId: this.turnId,
-      firstPlayer: this.roundNo % 2 === 1 ? 1 : 2,
+      firstPlayer: this.firstPlayerForRound(),
+      startingPlayer: this.startingPlayer,
+      turnOrderMode: this.turnOrderMode,
       actionsThisRound: this.actionsThisRound,
       artilleryUsedThisTurn: this.artilleryUsedThisTurn,
       deploymentCommitted: this.deploymentCommitted,
@@ -510,14 +655,20 @@ class GameEngine {
       players: { P1: "P1", P2: "P2" },
       startedAt: this.startedAt,
       endedAt: this.endedAt,
-      firstRoundFirstPlayer: 1,
+      firstRoundFirstPlayer: this.startingPlayer,
       rules: {
         board: "9x9",
+        turnOrderMode: this.turnOrderMode,
         deck: { sword: 9, shield: 9, spear: 7 },
         artilleryPerPlayer: 2,
         artilleryDamage: { center: 30, outer: 12, friendlyFire: true },
-        rank2: { cards: 3, hpMultiplier: 3, attackMultiplier: 2 },
-        rank3: { cards: 5, hpMultiplier: 5, attackMultiplier: 3 },
+        rank2: { cards: 3, hpMultiplier: 1.5, attackMultiplier: 1, maxOnBoardPerType: 1 },
+        rank3: "disabled",
+        eliteAbilities: {
+          sword: "斬入：親自擊殺目標後強制移入死亡格，對相鄰最低HP敵人追擊 100% base ATK（套互剋、不套決鬥）",
+          shield: "不主動攻擊；相鄰非盾友軍 50% 傷害轉移；對自身實際承受傷害 100% 反震",
+          spear: "射程 2 可穿透第一格；ATK 依有效攻擊方向數分攤，第二格 50%",
+        },
       },
       rounds: this.roundRecords,
       artilleryAnalysis: this.artilleryEvents,

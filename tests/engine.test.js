@@ -75,6 +75,29 @@ test("each server-issued turn permits only one deployment, including artillery a
   assert.equal(engine.board.flat().filter(Boolean).length, 3);
 });
 
+test("fixed-order mode keeps the randomly selected starter first in every round", () => {
+  const engine = new GameEngine({
+    matchId: "fixed-order",
+    roomCode: "FIXED1",
+    turnOrderMode: "fixed",
+    randomInt: () => 1,
+  });
+  assert.equal(engine.startingPlayer, 2);
+  assert.equal(engine.current, 2);
+  assert.equal(engine.firstPlayerForRound(1), 2);
+  assert.equal(engine.firstPlayerForRound(2), 2);
+  engine.players[0].hand = Array(5).fill("sword");
+  engine.players[1].hand = Array(5).fill("shield");
+  assert.equal(engine.deploy(2, intent(engine, { r: 8, c: 8, type: "shield", rank: 1 })).ok, true);
+  assert.equal(engine.deploy(1, intent(engine, { r: 0, c: 0, type: "sword", rank: 1 })).ok, true);
+  assert.equal(engine.roundNo, 2);
+  assert.equal(engine.current, 2);
+  assert.equal(engine.visibleStateFor(1).firstPlayer, 2);
+  assert.deepEqual(engine.roundRecords.map(record => record.firstPlayer), [2, 2]);
+  assert.equal(engine.fullMatchReport().firstRoundFirstPlayer, 2);
+  assert.equal(engine.fullMatchReport().rules.turnOrderMode, "fixed");
+});
+
 test("combat resolves once after both deployments", () => {
   const engine = game();
   engine.players[0].hand = ["sword"];
@@ -84,89 +107,57 @@ test("combat resolves once after both deployments", () => {
   assert.ok(engine.roundRecords[0].combat);
   assert.equal(engine.logs.filter(item => item.text.includes("由伺服器結算一次")).length, 1);
   assert.equal(engine.board[4][4].hp, 95);
-  assert.equal(engine.board[4][5].hp, 133);
+  // 盾不再減傷：劍 24 ATK 單目標決鬥 ×1.5 = 36 全額進入，160 - 36 = 124。
+  assert.equal(engine.board[4][5].hp, 124);
 });
 
-test("frequent rank-two deployments conserve all 25 cards", () => {
+test("elite deployments conserve all 25 cards under the one-per-type cap", () => {
   const engine = game();
   for (const player of engine.players) {
-    player.hand = Array(5).fill("sword");
-    player.deck = Array(20).fill("sword");
+    player.hand = ["sword", "sword", "sword", "shield", "shield"];
+    player.deck = [...Array(6).fill("sword"), ...Array(7).fill("shield"), ...Array(7).fill("spear")];
     player.cooldown = [];
   }
   engine.cardConservationAudits = [];
-  engine.auditCardConservation("rank2_repro_start");
-
-  const positions = {
-    1: [[0, 0], [0, 2], [0, 4], [0, 6], [0, 8], [2, 0], [2, 2], [2, 4], [2, 6]],
-    2: [[8, 0], [8, 2], [8, 4], [8, 6], [8, 8], [6, 0], [6, 2], [6, 4], [6, 6]],
-  };
+  const spots = { 1: [[0, 0], [0, 2], [0, 4]], 2: [[8, 0], [8, 2], [8, 4]] };
   const placed = { 1: 0, 2: 0 };
-  while (placed[2] < 9) {
+  while (placed[2] < 3) {
     const pid = engine.current;
-    const [r, c] = positions[pid][placed[pid]];
-    const rank = pid === 2 && placed[2] < 8 ? 2 : 1;
+    const [r, c] = spots[pid][placed[pid]];
+    const rank = placed[pid] === 0 ? 2 : 1;              // 第一手★★劍，之後只能出★劍
     const result = engine.deploy(pid, intent(engine, { r, c, type: "sword", rank }));
     assert.equal(result.ok, true, result.error);
     placed[pid]++;
     assert.equal(engine.cardDistribution(1).total, 25);
     assert.equal(engine.cardDistribution(2).total, 25);
   }
-
-  assert.deepEqual(engine.cardDistribution(2), {
-    deck: 0,
-    hand: 0,
-    cooldown: 0,
-    boardBoundCards: 25,
-    total: 25,
-    valid: true,
-  });
-  assert.equal(engine.board.flat().filter(unit => unit?.pid === 2).length, 9);
   assert.equal(engine.cardConservationAudits.every(audit => audit.valid), true);
 });
 
-test("five rank-three units bind all 25 cards while keeping five units on board", () => {
+test("rank three is disabled", () => {
   const engine = game();
-  for (const player of engine.players) {
-    player.hand = Array(5).fill("sword");
-    player.deck = Array(20).fill("sword");
-    player.cooldown = [];
-  }
-  engine.cardConservationAudits = [];
-  const positions = {
-    1: [[0, 0], [0, 2], [0, 4], [2, 0], [2, 2]],
-    2: [[8, 0], [8, 2], [8, 4], [6, 0], [6, 2]],
-  };
-  const placed = { 1: 0, 2: 0 };
-  while (placed[1] < 5) {
-    const pid = engine.current;
-    const [r, c] = positions[pid][placed[pid]];
-    const rank = pid === 1 ? 3 : 1;
-    const result = engine.deploy(pid, intent(engine, { r, c, type: "sword", rank }));
-    assert.equal(result.ok, true, result.error);
-    placed[pid]++;
-  }
-  const distribution = engine.cardDistribution(1);
-  assert.equal(engine.board.flat().filter(unit => unit?.pid === 1).length, 5);
-  assert.deepEqual(distribution, { deck: 0, hand: 0, cooldown: 0, boardBoundCards: 25, total: 25, valid: true });
-  assert.equal(engine.cardConservationAudits.every(audit => audit.valid), true);
+  engine.players[0].hand = Array(5).fill("sword");
+  const result = engine.deploy(1, intent(engine, { r: 4, c: 4, type: "sword", rank: 3 }));
+  assert.equal(result.ok, false);
+  assert.match(result.error, /★★★/);
+  assert.equal(baseStats("sword", 3), null);
 });
 
-test("death dismantles bound cards into cooldown without breaking 25-card conservation", () => {
+test("death dismantles an elite's three bound cards into cooldown", () => {
   const engine = game();
-  const stats = baseStats("sword", 3);
+  const stats = baseStats("sword", 2);
   engine.board = Array.from({ length: 9 }, () => Array(9).fill(null));
   engine.players[0].hand = [];
-  engine.players[0].deck = Array(20).fill("sword");
+  engine.players[0].deck = Array(22).fill("sword");
   engine.players[0].cooldown = [];
-  engine.board[4][4] = { id: 999, pid: 1, type: "sword", rank: 3, cards: 5, hp: 0, maxHp: stats.maxHp, atk: stats.atk };
+  engine.board[4][4] = { id: 999, pid: 1, type: "sword", rank: 2, cards: 3, hp: 0, maxHp: stats.maxHp, atk: stats.atk };
   const deaths = [];
   engine.removeDead("combat", deaths);
   assert.equal(deaths.length, 1);
-  assert.deepEqual(engine.cardDistribution(1), { deck: 20, hand: 0, cooldown: 5, boardBoundCards: 0, total: 25, valid: true });
+  assert.deepEqual(engine.cardDistribution(1), { deck: 22, hand: 0, cooldown: 3, boardBoundCards: 0, total: 25, valid: true });
   engine.ownerTurnStart(1);
   engine.ownerTurnStart(1);
   engine.ownerTurnStart(1);
-  assert.equal(engine.cardDistribution(1).total, 25);
   assert.equal(engine.players[0].cooldown.length, 0);
+  assert.equal(engine.cardDistribution(1).total, 25);
 });

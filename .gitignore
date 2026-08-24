@@ -3,3 +3,8 @@ node_modules/
 *.log
 match_logs/
 .env
+# 平衡實驗的產出資料（可由 runs/run.sh、runs2/run.sh、micro/*.js 重新產生）
+runs/*.json
+runs2/*.json
+micro/*.json
+micro/defense_out.txt

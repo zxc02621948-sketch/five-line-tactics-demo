@@ -74,6 +74,33 @@ test("two sessions synchronize, preserve privacy, reject illegal actions, win, a
   assert.equal(p1State.opponent.handCount, p2State.own.hand.length);
   assert.equal(p1State.cardDistribution.P1.total, 25);
   assert.equal(p1State.cardDistribution.P2.total, 25);
+  assert.equal(p1State.turnOrderMode, "alternating");
+
+  const fixedP1 = client(url), fixedP2 = client(url);
+  await Promise.all([fixedP1.open(), fixedP2.open()]);
+  fixedP1.send({ type: "create_room", mode: "fixed" });
+  const fixedSession = await fixedP1.wait(message => message.type === "session");
+  fixedP2.send({ type: "join_room", roomCode: fixedSession.roomCode });
+  await fixedP2.wait(message => message.type === "session");
+  const [fixedState1, fixedState2] = await Promise.all([
+    fixedP1.wait(message => message.type === "state" && message.state),
+    fixedP2.wait(message => message.type === "state" && message.state),
+  ]);
+  const fixedStates = { 1: fixedState1.state, 2: fixedState2.state };
+  const fixedClients = { 1: fixedP1, 2: fixedP2 };
+  const fixedFirst = fixedState1.state.startingPlayer;
+  const fixedSecond = 3 - fixedFirst;
+  assert.equal(fixedState1.state.turnOrderMode, "fixed");
+  assert.equal(fixedState1.state.firstPlayer, fixedFirst);
+  fixedClients[fixedFirst].send({ type: "action", requestId: "fixed-first", intent: { kind: "deploy", r: 0, c: 0, type: fixedStates[fixedFirst].own.hand[0], rank: 1, turnId: fixedStates[fixedFirst].turnId } });
+  await fixedClients[fixedFirst].wait(message => message.type === "accepted" && message.requestId === "fixed-first");
+  const fixedSecondTurn = await fixedClients[fixedSecond].wait(message => message.type === "state" && message.state?.current === fixedSecond);
+  fixedClients[fixedSecond].send({ type: "action", requestId: "fixed-second", intent: { kind: "deploy", r: 8, c: 8, type: fixedSecondTurn.state.own.hand[0], rank: 1, turnId: fixedSecondTurn.state.turnId } });
+  await fixedClients[fixedSecond].wait(message => message.type === "accepted" && message.requestId === "fixed-second");
+  const fixedRound2 = await fixedClients[fixedFirst].wait(message => message.type === "state" && message.state?.roundNo === 2);
+  assert.equal(fixedRound2.state.current, fixedFirst);
+  assert.equal(fixedRound2.state.firstPlayer, fixedFirst);
+  fixedP1.ws.close(); fixedP2.ws.close();
 
   p2.ws.close();
   const disconnected = await p1.wait(message => message.type === "state" && message.status === "opponent_disconnected");
@@ -92,8 +119,9 @@ test("two sessions synchronize, preserve privacy, reject illegal actions, win, a
 
   const count = { sword: 0, shield: 0, spear: 0 };
   p1State.own.hand.forEach(type => count[type]++);
-  const impossible = Object.keys(count).find(type => count[type] < 5);
-  p1.send({ type: "action", requestId: "missing-card", intent: { kind: "deploy", r: 0, c: 0, type: impossible, rank: 3, turnId: p1State.turnId } });
+  // 5 張手牌分 3 種兵種，必定至少有一種不足 3 張（★★ 的成本）
+  const impossible = Object.keys(count).find(type => count[type] < 3);
+  p1.send({ type: "action", requestId: "missing-card", intent: { kind: "deploy", r: 0, c: 0, type: impossible, rank: 2, turnId: p1State.turnId } });
   assert.match((await p1.wait(message => message.type === "rejected" && message.requestId === "missing-card")).error, /沒有足夠/);
 
   const p1Deploy = { type: "action", requestId: "p1-deploy", intent: { kind: "deploy", r: 4, c: 4, type: p1State.own.hand[0], rank: 1, turnId: p1State.turnId } };
