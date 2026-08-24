@@ -346,7 +346,7 @@ test("兩個頁面都能真的隱藏 overlay：.hidden 必須來自共用樣式"
   // 規則視窗會一進頁面就展開而且關不掉。
   assert.match(css, /^\.hidden\s*\{[^}]*display:\s*none/m, "alpha_board.css 必須定義 .hidden");
   for (const [label, page] of [["alpha.html", html], ["index.html", localHtml]]) {
-    assert.match(page, /<link rel="stylesheet" href="\/alpha_board\.css">/, `${label} 必須載入共用樣式`);
+    assert.ok(page.includes('href="/alpha_board.css?v='), `${label} 必須載入共用樣式`);
     assert.match(page, /id="rulesOverlay"[^>]*class="overlay hidden"/, `${label} 的規則視窗預設應為隱藏`);
     assert.match(page, /id="rulesCloseBtn"/, `${label} 缺少關閉按鈕`);
   }
@@ -411,8 +411,8 @@ test("兵種大卡不得被任何祖先裁切", () => {
 
 test("單機與連線使用同一組版面樣式與結構", () => {
   for (const [label, page] of [["alpha.html", html], ["index.html", localHtml]]) {
-    assert.match(page, /href="\/game_shell\.css"/, `${label} 必須載入共用外殼樣式`);
-    assert.match(page, /href="\/local_layout\.css/, `${label} 必須載入共用版面`);
+    assert.ok(page.includes('href="/game_shell.css?v='), `${label} 必須載入共用外殼樣式`);
+    assert.ok(page.includes('href="/local_layout.css?v='), `${label} 必須載入共用版面`);
     // 相同的結構槽位
     for (const marker of ['class="top"', 'class="layout"', 'class="gameCol"', 'class="boardWrap"',
       'class="handPanel"', 'class="handHeader"', 'id="hand"', 'id="rankRow"',
@@ -455,4 +455,69 @@ test("棄賽會結束對局且不修改引擎規則", () => {
   assert.doesNotMatch(handler, /engine\.gameOver\s*=|engine\.winner\s*=/, "不得直接改寫引擎狀態");
   // 重開會清掉棄賽狀態
   assert.match(localClient, /aiThinking = false; resigned = null;/);
+});
+
+/* ---------------- 攻擊指示（戰鬥預演） ---------------- */
+
+test("戰鬥預演一律走正式引擎，前端不自算傷害", () => {
+  assert.match(sharedUi, /function forecast\(board, ghost\)/);
+  assert.match(sharedUi, /scratch\.resolveCombat\(\)/, "必須呼叫正式的 resolveCombat");
+  // 前端不得出現任何傷害公式
+  for (const [label, text] of [["alpha_ui.js", sharedUi], ["alpha_client.js", client],
+    ["local_client.js", localClient]]) {
+    assert.doesNotMatch(text, /counterBonus|\* 1\.25|\* 1\.5\b|targets\.length/,
+      `${label} 不得自行計算傷害`);
+  }
+});
+
+test("預演不得污染真實盤面", () => {
+  // forecast 會複製一份盤面再跑，原始 unit 物件不可被改到
+  assert.match(sharedUi, /board\.map\(row => row\.map\(unit => \(unit \? \{ \.\.\.unit \} : null\)\)\)/);
+  // 用正式引擎實地驗一次
+  const engine = fixed();
+  engine.board = Array.from({ length: 9 }, () => Array(9).fill(null));
+  const mk = (pid, type) => { const s = baseStats(type, 1);
+    return { id: pid, pid, type, rank: 1, cards: 1, hp: s.maxHp, maxHp: s.maxHp, atk: s.atk }; };
+  const spear = mk(1, "spear"), shield = mk(2, "shield");
+  engine.board[4][4] = spear; engine.board[4][5] = shield;
+  const clone = fixed();
+  clone.board = engine.board.map(row => row.map(u => (u ? { ...u } : null)));
+  const view = clone.resolveCombat();
+  assert.equal(shield.hp, 160, "預演後原盤面的 HP 不得改變");
+  assert.equal(spear.hp, 120);
+  assert.equal(view.packets.length, 2, "預演本身仍要算出攻擊關係");
+});
+
+test("指示層疊在棋盤上但不吃點擊、不參與版面", () => {
+  const rule = css.match(/\.forecastLayer\s*\{[^}]*\}/)[0];
+  assert.match(rule, /position:\s*absolute/, "必須絕對定位，不得推擠版面");
+  assert.match(rule, /pointer-events:\s*none/, "不得攔截棋盤點擊");
+  assert.match(css, /\.boardWrap \{[^}]*position:\s*relative/, "需要定位基準");
+  for (const [label, page] of [["alpha.html", html], ["index.html", localHtml]]) {
+    assert.match(page, /<svg id="forecastLayer"[^>]*class="forecastLayer"/, `${label} 缺少指示層`);
+  }
+  // 對齊時要補上邊框寬度，否則會偏移
+  assert.match(sharedUi, /boardEl\.clientLeft/);
+  assert.match(sharedUi, /boardEl\.clientTop/);
+});
+
+test("兩個 client 都掛上 hover 預演，且離開會清除", () => {
+  for (const [label, text] of [["alpha_client.js", client], ["local_client.js", localClient]]) {
+    assert.match(text, /cell\.addEventListener\("mouseenter", \(\) => \{ hoverCell = \[r, c\]; renderForecast\(\); \}\)/, `${label} 缺少 hover`);
+    assert.match(text, /cell\.addEventListener\("mouseleave", \(\) => \{ hoverCell = null; renderForecast\(\); \}\)/, `${label} 缺少清除`);
+    assert.match(text, /function renderForecast\(\)/);
+    // 空格要能預演「放下去會怎樣」
+    assert.match(text, /ghost = \{ r, c, unit:/, `${label} 缺少落子預演`);
+  }
+});
+
+test("靜態資源在 alpha 期間不得被快取", () => {
+  // CSS 曾被 max-age=3600 快取一小時，造成樣式修好了玩家仍看到舊版
+  assert.match(server, /\/\\.\(html\|js\|css\)\$\/\.test\(filename\) \? "no-store"/);
+  for (const [label, page] of [["alpha.html", html], ["index.html", localHtml]]) {
+    for (const sheet of ["alpha_board.css", "game_shell.css", "local_layout.css"]) {
+      const marker = `href="/${sheet}?v=`;
+      assert.ok(page.includes(marker), `${label} 的 ${sheet} 需要版本號`);
+    }
+  }
 });

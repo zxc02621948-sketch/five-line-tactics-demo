@@ -251,7 +251,9 @@ const server = http.createServer(async (req, res) => {
     const data = await fs.promises.readFile(path.join(ROOT, filename));
     res.writeHead(200, {
       "Content-Type": contentType,
-      "Cache-Control": filename.endsWith(".html") || filename.endsWith(".js") ? "no-store" : "public, max-age=3600",
+      // Alpha 迭代期：HTML/JS/CSS 一律不快取。先前 CSS 被 max-age=3600 快取一小時，
+      // 造成樣式修好了但玩家看到的還是舊版。圖示等二進位資源仍可快取。
+      "Cache-Control": /\.(html|js|css)$/.test(filename) ? "no-store" : "public, max-age=3600",
       "X-Content-Type-Options": "nosniff",
     });
     res.end(data);

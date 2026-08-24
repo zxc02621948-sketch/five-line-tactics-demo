@@ -1,7 +1,8 @@
 // /local 單機測試。規則完全來自正式的 game_engine.js，這裡只做操作與顯示。
 // 兩種模式維持原本用途：對電腦（P2 由簡單啟發式代打）與本機雙人（同一台電腦輪流操作）。
 (() => {
-  const { GameEngine, ALPHA_TURN_ORDER } = globalThis.FiveLineEngine;
+  const FiveLine = globalThis.FiveLineEngine;
+  const { GameEngine, ALPHA_TURN_ORDER } = FiveLine;
   const UI = globalThis.AlphaUI;
   const { NAMES } = UI;
   const $ = selector => document.querySelector(selector);
@@ -55,6 +56,8 @@
         cell.appendChild(div);
       }
       cell.addEventListener("click", () => onCell(r, c));
+      cell.addEventListener("mouseenter", () => { hoverCell = [r, c]; renderForecast(); });
+      cell.addEventListener("mouseleave", () => { hoverCell = null; renderForecast(); });
       boardEl.appendChild(cell);
     }
   }
@@ -106,6 +109,34 @@
     renderCardDetail();
   }
 
+
+  // ---- 攻擊指示：滑鼠移到格子上就用正式引擎預演一次 ----
+  // 已有棋子的格 → 它打誰、誰打它；空格 → 若把手上選的兵種放下去會發生什麼。
+  // 觸控沒有 hover：點「已有棋子」的格子同樣會顯示（那格本來也不能部署，不衝突）。
+  let hoverCell = null;
+
+  function renderForecast() {
+    const layer = $("#forecastLayer");
+    const boardEl = $("#board");
+    if (!layer || !boardEl || !engine) return;
+    layer.innerHTML = "";
+    if (!hoverCell) return;
+    const [r, c] = hoverCell;
+    let ghost = null;
+    if (!engine.board[r][c]) {
+      if (!selectedType || !humanTurn()) return;
+      const stats = FiveLine.baseStats(selectedType, selectedRank);
+      if (!stats) return;
+      ghost = { r, c, unit: { id: -1, pid: engine.current, type: selectedType, rank: selectedRank,
+        cards: selectedRank === 2 ? 3 : 1, hp: stats.maxHp, maxHp: stats.maxHp, atk: stats.atk } };
+    }
+    const view = UI.forecast(engine.board, ghost);
+    const focus = UI.focusOn(view, r, c);
+    if (!view || !focus) return;
+    if (!focus.outgoing.length && !focus.incoming.length) return;
+    UI.drawForecast(layer, boardEl, view, focus);
+  }
+
   function renderCardDetail() {
     UI.renderCardDetail($("#cardDetail"), hoverType || selectedType, catalog());
   }
@@ -126,6 +157,7 @@
     renderBoard();
     renderHand();
     renderLogs();
+    renderForecast();
     const owner = mode === "pve" && engine.current === 2 ? "P2（電腦）" : `P${engine.current}`;
     const winnerLabel = resigned
       ? `P${resigned} 棄賽｜P${3 - resigned} 獲勝`

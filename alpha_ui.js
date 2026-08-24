@@ -137,6 +137,44 @@
       </ul>`;
   }
 
+  // ---- 戰鬥預演 ----
+  // 複製目前盤面到一個拋棄式引擎，跑一次正式 resolveCombat，取得完整的攻擊關係。
+  // 前端不做任何傷害計算，互剋／方向分攤／護衛／斬入／反震全部來自 game_engine.js。
+  // 盤面是公開資訊，所以連線模式在前端預演不構成作弊。
+  let scratch = null;
+  function forecast(board, ghost) {
+    const engine = globalThis.FiveLineEngine && globalThis.FiveLineEngine.GameEngine;
+    if (!engine || !board) return null;
+    if (!scratch) scratch = new engine({ randomInt: () => 0 });
+    scratch.board = board.map(row => row.map(unit => (unit ? { ...unit } : null)));
+    // ghost：把「打算放下的那顆棋」也算進去，玩家就能看到落子後會發生什麼
+    if (ghost && !scratch.board[ghost.r][ghost.c]) scratch.board[ghost.r][ghost.c] = { ...ghost.unit };
+    scratch.logs = [];
+    return scratch.resolveCombat();
+  }
+
+  // 針對某一格，整理出「它打誰、誰打它、會不會死」
+  function focusOn(result, r, c) {
+    if (!result) return null;
+    const at = (a, b) => a.r === r && a.c === b;
+    const outgoing = result.packets.filter(p => p.from.r === r && p.from.c === c);
+    const incoming = result.packets.filter(p => p.to.r === r && p.to.c === c);
+    const merge = list => {
+      const map = new Map();
+      for (const p of list) {
+        const key = `${p.to.r},${p.to.c},${p.from.r},${p.from.c}`;
+        map.set(key, (map.get(key) || 0) + p.amount);
+      }
+      return [...map].map(([key, amount]) => {
+        const [tr, tc, fr, fc] = key.split(",").map(Number);
+        return { from: { r: fr, c: fc }, to: { r: tr, c: tc }, amount: Math.round(amount) };
+      });
+    };
+    const dies = cell => result.deaths.some(d => d.r === cell.r && d.c === cell.c)
+      || result.damage.some(d => d.r === cell.r && d.c === cell.c && d.hpAfter <= 0);
+    return { outgoing: merge(outgoing), incoming: merge(incoming), selfDies: dies({ r, c }) };
+  }
+
   // 棋盤尺寸：量容器、直接寫像素。棋盤類遊戲的標準做法，不依賴 aspect-ratio /
   // max-height / 容器查詢這些會互相覆寫的規則，所以不會被壓扁或塌陷。
   // 取 9 的倍數，讓每一格都是整數像素、格線不會有半像素縫隙。
@@ -157,6 +195,70 @@
     globalThis.addEventListener("resize", apply);
     if (typeof ResizeObserver === "function") new ResizeObserver(apply).observe(wrapEl);
     return apply;                                                  // 交給 render() 每次重算，不倚賴 RO 的時機
+  }
+
+  // ---- 攻擊指示層 ----
+  // 疊在棋盤上的 SVG。pointer-events:none，完全不影響點擊與版面。
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  function drawForecast(layer, boardEl, view, focus) {
+    if (!layer || !boardEl) return;
+    layer.innerHTML = "";
+    const size = boardEl.clientWidth;
+    if (!size || !view) { layer.setAttribute("viewBox", "0 0 1 1"); return; }
+    const cell = size / 9;
+    layer.setAttribute("viewBox", `0 0 ${size} ${size}`);
+    layer.style.width = `${size}px`;
+    layer.style.height = `${size}px`;
+    // 對齊到棋盤的內容區：getBoundingClientRect 含邊框，clientWidth 不含，
+    // 所以要補上 clientLeft/clientTop（＝邊框寬度）才會剛好疊合。
+    const rect = boardEl.getBoundingClientRect();
+    const wrap = layer.parentElement.getBoundingClientRect();
+    layer.style.left = `${rect.left - wrap.left + boardEl.clientLeft}px`;
+    layer.style.top = `${rect.top - wrap.top + boardEl.clientTop}px`;
+    const center = (r, c) => [c * cell + cell / 2, r * cell + cell / 2];
+
+    const add = (tag, attrs, text) => {
+      const node = document.createElementNS(SVG_NS, tag);
+      for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+      if (text !== undefined) node.textContent = text;
+      layer.appendChild(node);
+      return node;
+    };
+
+    // 箭頭：從攻擊者指向目標，中點標預測傷害
+    const arrow = (from, to, amount, kind) => {
+      const [x1, y1] = center(from.r, from.c);
+      const [x2, y2] = center(to.r, to.c);
+      const dx = x2 - x1, dy = y2 - y1;
+      const len = Math.hypot(dx, dy) || 1;
+      const inset = cell * 0.34;
+      const sx = x1 + dx / len * inset, sy = y1 + dy / len * inset;
+      const ex = x2 - dx / len * inset, ey = y2 - dy / len * inset;
+      add("line", { x1: sx, y1: sy, x2: ex, y2: ey, class: `fcLine ${kind}` });
+      add("polygon", {
+        class: `fcHead ${kind}`,
+        points: [[0, -4], [9, 0], [0, 4]].map(([px, py]) => `${px},${py}`).join(" "),
+        transform: `translate(${ex} ${ey}) rotate(${Math.atan2(dy, dx) * 180 / Math.PI})`,
+      });
+      const mx = (sx + ex) / 2, my = (sy + ey) / 2;
+      add("rect", { class: `fcChipBg ${kind}`, x: mx - 15, y: my - 10, width: 30, height: 18, rx: 9 });
+      add("text", { class: `fcChip ${kind}`, x: mx, y: my + 3.5 }, amount);
+    };
+
+    for (const packet of focus.incoming) arrow(packet.from, packet.to, packet.amount, "in");
+    for (const packet of focus.outgoing) arrow(packet.from, packet.to, packet.amount, "out");
+
+    // 這一輪會陣亡的單位加紅框
+    for (const death of view.deaths) {
+      add("rect", { class: "fcDoom", x: death.c * cell + 2, y: death.r * cell + 2,
+        width: cell - 4, height: cell - 4, rx: 6 });
+    }
+    // ★★劍斬入的移動軌跡
+    for (const cleave of view.cleaves || []) {
+      const [x1, y1] = center(cleave.from.r, cleave.from.c);
+      const [x2, y2] = center(cleave.to.r, cleave.to.c);
+      add("line", { x1, y1, x2, y2, class: "fcCleave" });
+    }
   }
 
   // 大卡詳情：沒有目標時整張卡隱藏（.idle），有目標才浮出。
@@ -189,6 +291,6 @@
   globalThis.AlphaUI = {
     ICONS, NAMES, SHORT_TAG, ELITE_TAG, ABILITY, ELITE_ABILITY,
     handCardHtml, unitHtml, unitTitle, cardDetailHtml, renderCardDetail, rulesHtml, wireRulesOverlay,
-    autoSizeBoard,
+    autoSizeBoard, forecast, focusOn, drawForecast,
   };
 })();

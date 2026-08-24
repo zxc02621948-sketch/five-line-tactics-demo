@@ -209,3 +209,25 @@
     height: 260px;
   }
 }
+
+/* ---- 攻擊指示層：疊在棋盤上的預演。不接受點擊、不參與版面 ---- */
+.boardWrap { position: relative; }
+.forecastLayer {
+  position: absolute;
+  pointer-events: none;
+  z-index: 5;
+  overflow: visible;
+}
+.fcLine { stroke-width: 2.5; stroke-linecap: round; fill: none; }
+.fcLine.out { stroke: #ff9b6b; }
+.fcLine.in { stroke: #7cc4ff; stroke-dasharray: 6 4; }
+.fcHead.out { fill: #ff9b6b; }
+.fcHead.in { fill: #7cc4ff; }
+.fcChipBg { fill: #0d1117; stroke-width: 1.5; }
+.fcChipBg.out { stroke: #ff9b6b; }
+.fcChipBg.in { stroke: #7cc4ff; }
+.fcChip { font-size: 12px; font-weight: 800; text-anchor: middle; }
+.fcChip.out { fill: #ffd0b8; }
+.fcChip.in { fill: #cfe8ff; }
+.fcDoom { fill: none; stroke: #ff5d5d; stroke-width: 3; stroke-dasharray: 5 4; }
+.fcCleave { stroke: #ffd43b; stroke-width: 3; stroke-dasharray: 2 6; stroke-linecap: round; }

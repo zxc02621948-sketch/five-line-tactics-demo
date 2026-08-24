@@ -135,6 +135,8 @@
         cell.appendChild(div);
       }
       cell.addEventListener("click", () => onCell(r, c));
+      cell.addEventListener("mouseenter", () => { hoverCell = [r, c]; renderForecast(); });
+      cell.addEventListener("mouseleave", () => { hoverCell = null; renderForecast(); });
       boardEl.appendChild(cell);
     }
   }
@@ -187,6 +189,32 @@
     renderCardDetail();
   }
 
+
+  // ---- 攻擊指示：滑鼠移到格子上就用正式引擎預演一次 ----
+  // 盤面是公開資訊，前端用同一份 game_engine.js 重跑一次公開運算，不涉及隱藏資訊。
+  let hoverCell = null;
+
+  function renderForecast() {
+    const layer = $("#forecastLayer");
+    if (!layer || !boardEl) return;
+    layer.innerHTML = "";
+    const board = state?.board;
+    if (!hoverCell || !board) return;
+    const [r, c] = hoverCell;
+    let ghost = null;
+    if (!board[r][c]) {
+      const stats = globalThis.FiveLineEngine?.baseStats(selectedType, selectedRank);
+      if (!selectedType || !ownTurn() || !stats) return;
+      ghost = { r, c, unit: { id: -1, pid: selfPid, type: selectedType, rank: selectedRank,
+        cards: selectedRank === 2 ? 3 : 1, hp: stats.maxHp, maxHp: stats.maxHp, atk: stats.atk } };
+    }
+    const view = UI.forecast(board, ghost);
+    const focus = UI.focusOn(view, r, c);
+    if (!view || !focus) return;
+    if (!focus.outgoing.length && !focus.incoming.length) return;
+    UI.drawForecast(layer, boardEl, view, focus);
+  }
+
   // 卡牌詳情固定在手牌下方，不浮動、不會蓋住棋盤操作區。
   function renderCardDetail() {
     UI.renderCardDetail($("#cardDetail"), hoverType || selectedType, catalog());
@@ -226,6 +254,7 @@
     renderBoard();
     renderHand();
     renderLogs();
+    renderForecast();
 
     if (!state) {
       $("#turnText").textContent = roomCode ? "等待對手" : "";

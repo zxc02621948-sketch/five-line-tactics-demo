@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>五連戰線｜遠端真人 Alpha</title>
   <link rel="icon" href="/icon-192.png">
-  <link rel="stylesheet" href="/alpha_board.css">
-  <link rel="stylesheet" href="/game_shell.css">
-  <link rel="stylesheet" href="/local_layout.css?v=3">
+  <link rel="stylesheet" href="/alpha_board.css?v=5">
+  <link rel="stylesheet" href="/game_shell.css?v=5">
+  <link rel="stylesheet" href="/local_layout.css?v=5">
   <style>
     /* 只保留連線專屬的樣式；版面一律沿用與單機相同的 game_shell + local_layout。 */
     .lobby { display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; }
@@ -45,7 +45,10 @@
 
   <div class="layout">
     <div class="gameCol">
-      <div class="boardWrap"><div id="board" class="board"></div></div>
+      <div class="boardWrap">
+        <div id="board" class="board"></div>
+        <svg id="forecastLayer" class="forecastLayer" aria-hidden="true"></svg>
+      </div>
       <div class="handPanel">
         <div class="handHeader">
           <strong id="handTitle">等待加入房間</strong>
