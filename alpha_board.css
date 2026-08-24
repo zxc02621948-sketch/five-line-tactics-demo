@@ -1,0 +1,107 @@
+.boardWrap {
+  display: flex;
+  justify-content: center;
+}
+
+.board {
+  width: min(76vh, 760px, 100%);
+  aspect-ratio: 1 / 1;
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  grid-template-rows: repeat(9, minmax(0, 1fr));
+  border: 2px solid #526079;
+  background: #222b39;
+  overflow: hidden;
+}
+
+.cell {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  border: 1px solid #3b4658;
+  background: #18202b;
+  cursor: pointer;
+}
+
+.cell:hover {
+  background: #273346;
+}
+
+.unit {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 74%;
+  height: 74%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  display: block;
+  border: clamp(2px, .28vw, 3px) solid;
+  font-weight: 900;
+  line-height: 1;
+  overflow: visible;
+}
+
+.unit.p1 {
+  border-color: var(--red);
+  background: #672d38;
+}
+
+.unit.p2 {
+  border-color: var(--blue);
+  background: #214b70;
+}
+
+.unitIcon {
+  position: absolute;
+  left: 50%;
+  top: 44%;
+  transform: translate(-50%, -50%);
+  font-size: clamp(13px, 2.1vw, 22px);
+  line-height: 1;
+}
+
+.stars {
+  position: absolute;
+  left: 50%;
+  top: 5%;
+  transform: translateX(-50%);
+  max-width: 94%;
+  color: var(--warn);
+  font-size: clamp(7px, .9vw, 10px);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.unit small {
+  position: absolute;
+  left: 50%;
+  bottom: 12%;
+  transform: translateX(-50%);
+  max-width: 96%;
+  color: #fff;
+  font-size: clamp(6px, .78vw, 9px);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px #000;
+}
+
+.hpbar {
+  position: absolute;
+  left: 9%;
+  right: 9%;
+  bottom: 4%;
+  height: clamp(2px, .28vw, 4px);
+  overflow: hidden;
+  border-radius: 9px;
+  background: #3a1d1d;
+}
+
+.hpbar i {
+  display: block;
+  height: 100%;
+  background: var(--green);
+}

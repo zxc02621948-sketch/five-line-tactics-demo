@@ -21,6 +21,7 @@ async function waitUntil(predicate, timeout = 5000) {
   try {
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const port = server.address().port;
+    const alphaPath = process.env.ALPHA_PATH || "/";
     const browserExecutable = [
       process.env.CHROME_PATH,
       "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
@@ -38,8 +39,8 @@ async function waitUntil(predicate, timeout = 5000) {
     p2Page.on("pageerror", error => pageErrors.push(`P2: ${error.message}`));
 
     await Promise.all([
-      p1Page.goto(`http://127.0.0.1:${port}/`),
-      p2Page.goto(`http://127.0.0.1:${port}/`),
+      p1Page.goto(`http://127.0.0.1:${port}${alphaPath}`),
+      p2Page.goto(`http://127.0.0.1:${port}${alphaPath}`),
     ]);
     await p1Page.locator("#createBtn").click();
     await p1Page.locator("#roomIdentity").waitFor({ state: "visible" });
@@ -57,6 +58,7 @@ async function waitUntil(predicate, timeout = 5000) {
     const cells = { 1: [0, 1, 2, 3, 4], 2: [72, 73, 74, 75, 76] };
     const placed = { 1: 0, 2: 0 };
     const room = rooms.get(code);
+    assert.equal(room.mode, alphaPath.includes("fixed") ? "fixed" : "alternating");
     while (!room.game.gameOver) {
       const pid = room.game.current;
       const cellIndex = cells[pid][placed[pid]++];

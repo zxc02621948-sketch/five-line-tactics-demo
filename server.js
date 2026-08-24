@@ -16,7 +16,9 @@ const rooms = new Map();
 const STATIC_FILES = new Map([
   ["/", ["alpha.html", "text/html; charset=utf-8"]],
   ["/alpha.html", ["alpha.html", "text/html; charset=utf-8"]],
+  ["/alpha-fixed.html", ["alpha.html", "text/html; charset=utf-8"]],
   ["/alpha_client.js", ["alpha_client.js", "text/javascript; charset=utf-8"]],
+  ["/alpha_board.css", ["alpha_board.css", "text/css; charset=utf-8"]],
   ["/local", ["index.html", "text/html; charset=utf-8"]],
   ["/local.html", ["index.html", "text/html; charset=utf-8"]],
   ["/manifest.webmanifest", ["manifest.webmanifest", "application/manifest+json"]],
@@ -73,6 +75,7 @@ function broadcastRoom(room) {
       selfPid: pid,
       opponentConnected: Boolean(opponent?.connected),
       status: roomStatus(room, pid),
+      roomMode: room.mode,
       state: room.game ? room.game.visibleStateFor(pid) : null,
     });
   }
@@ -80,7 +83,7 @@ function broadcastRoom(room) {
 
 function maybeStart(room) {
   if (!room.game && room.players[1]?.connected && room.players[2]?.connected) {
-    room.game = new GameEngine({ matchId: crypto.randomUUID(), roomCode: room.code });
+    room.game = new GameEngine({ matchId: crypto.randomUUID(), roomCode: room.code, turnOrderMode: room.mode });
     room.startedAt = Date.now();
   }
   broadcastRoom(room);
@@ -121,11 +124,12 @@ function detachPreviousSession(ws) {
   delete ws.alphaSession;
 }
 
-function createRoom(ws) {
+function createRoom(ws, rawMode) {
   detachPreviousSession(ws);
   const code = roomCode();
   const room = {
     code,
+    mode: rawMode === "fixed" ? "fixed" : "alternating",
     players: { 1: newSeat(1, ws), 2: null },
     game: null,
     createdAt: Date.now(),
@@ -253,7 +257,7 @@ wss.on("connection", ws => {
     let message;
     try { message = JSON.parse(raw.toString()); }
     catch { return sendJson(ws, { type: "error", error: "訊息不是合法 JSON" }); }
-    if (message.type === "create_room") createRoom(ws);
+    if (message.type === "create_room") createRoom(ws, message.mode);
     else if (message.type === "join_room") joinRoom(ws, message.roomCode);
     else if (message.type === "reconnect") reconnect(ws, message.roomCode, message.token);
     else if (message.type === "action") handleAction(ws, message).catch(error => {

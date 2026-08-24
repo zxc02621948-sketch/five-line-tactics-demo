@@ -2,7 +2,10 @@
 
 目前同時保留兩種入口：
 - 遠端真人 Alpha：啟動 Node Server 後開啟 `http://房主IP:3000`。
+- 固定順序實驗：開啟 `http://房主IP:3000/alpha-fixed.html`；每局隨機先手，之後整局維持相同順序。
 - 原本本機 PVE／雙人原型：Server 啟動後開啟 `http://localhost:3000/local`，或直接開啟 `index.html`。
+
+固定順序實驗房間會標記為 `fixed`；原本 `/alpha.html` 與首頁仍維持每輪交換先行者，不會被實驗模式取代。
 
 ## 第一次啟動遠端 Alpha（Windows）
 1. 安裝 [Node.js LTS](https://nodejs.org/)；安裝時維持預設選項。

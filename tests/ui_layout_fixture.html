@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Alpha board UI fixture</title>
+  <link rel="stylesheet" href="/alpha_board.css">
+  <style>
+    :root{--red:#ff6b6b;--blue:#4dabf7;--warn:#ffd43b;--green:#69db7c}
+    *{box-sizing:border-box}body{margin:0;background:#10131a;color:#edf2f7;font-family:system-ui,sans-serif}.fixture{width:min(94vw,760px);margin:16px auto}
+  </style>
+</head>
+<body>
+  <main class="fixture"><div id="board" class="board"></div></main>
+  <script>
+    const board = document.querySelector("#board");
+    const fixtures = new Map([
+      [0, [1, "⚔", "120/120", "p1"]],
+      [8, [2, "🛡", "480/480", "p2"]],
+      [40, [3, "🛡", "800/800", "p1"]],
+      [41, [2, "🔱", "360/360", "p2"]],
+      [48, [1, "🛡", "160/160", "p1"]],
+      [80, [3, "⚔", "600/600", "p2"]],
+    ]);
+    for (let index = 0; index < 81; index++) {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      const data = fixtures.get(index);
+      if (data) {
+        const [rank, icon, hp, player] = data;
+        cell.innerHTML = `<div class="unit ${player}"><span class="stars">${"★".repeat(rank)}</span><span class="unitIcon">${icon}</span><small>${hp}</small><span class="hpbar"><i style="width:100%"></i></span></div>`;
+      }
+      board.appendChild(cell);
+    }
+  </script>
+</body>
+</html>
