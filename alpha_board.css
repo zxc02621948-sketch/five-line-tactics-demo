@@ -105,3 +105,63 @@
   height: 100%;
   background: var(--green);
 }
+
+/* ---- 入口 / 規則 / 卡牌詳情（Alpha UX） ---- */
+.counterHint { color: #edf2f7; letter-spacing: .5px; }
+.counterHint b { color: #ffd43b; font-weight: 700; }
+.helpBtn { margin-left: auto; }
+
+.overlay {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(8, 11, 16, .82);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px; overflow: auto;
+}
+.overlayBox {
+  background: #1a202b; border: 1px solid #465269; border-radius: 16px;
+  padding: 22px; max-width: 720px; width: 100%;
+  box-shadow: 0 20px 60px #000a;
+}
+.overlayBox h2 { margin: 0 0 6px; font-size: 21px; }
+.overlaySub { margin: 0 0 18px; color: #aab4c3; font-size: 13px; line-height: 1.7; }
+.entryChoices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 640px) { .entryChoices { grid-template-columns: 1fr; } }
+.entryBtn {
+  display: block; text-align: left; text-decoration: none;
+  padding: 16px; border-radius: 12px; line-height: 1.6;
+}
+.entryTitle { display: block; font-size: 17px; font-weight: 800; margin-bottom: 6px; }
+.entryDesc { display: block; font-size: 12px; color: #aab4c3; }
+.warnText { color: #ffd43b; }
+
+.rulesBox { max-width: 860px; max-height: 88vh; display: flex; flex-direction: column; }
+.rulesHead { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.rulesHead h2 { margin: 0; }
+.rulesBody { overflow: auto; font-size: 13px; line-height: 1.85; padding-right: 4px; }
+.rulesBody h3 { font-size: 14px; margin: 16px 0 6px; color: #ffd43b; }
+.rulesBody h3:first-child { margin-top: 0; }
+.rulesBody ul { margin: 0; padding-left: 20px; }
+.rulesBody .flow { background: #111722; border: 1px solid #343d4d; border-radius: 8px; padding: 8px 10px; }
+.rulesBody table { border-collapse: collapse; width: 100%; margin-top: 4px; }
+.rulesBody th, .rulesBody td { border: 1px solid #343d4d; padding: 5px 8px; text-align: left; }
+.rulesBody th { color: #aab4c3; font-weight: 600; }
+
+/* 手牌小卡的數值列 */
+.card { min-width: 92px; }
+.cardStats { display: block; font-size: 11px; color: #aab4c3; margin-top: 3px; line-height: 1.5; }
+.cardTag {
+  display: inline-block; margin-top: 4px; padding: 1px 6px; border-radius: 999px;
+  background: #2f3b52; border: 1px solid #4b5870; font-size: 10px; color: #dbe4f0;
+}
+
+/* 卡牌詳情：固定在手牌下方，不會蓋住棋盤 */
+.cardDetail {
+  margin-top: 10px; padding: 10px 12px; border-radius: 10px;
+  background: #111722; border: 1px solid #343d4d;
+  font-size: 12px; line-height: 1.8; color: #dbe4f0; min-height: 64px;
+}
+.cardDetail .detailHead { font-size: 14px; font-weight: 800; margin-bottom: 4px; }
+.cardDetail .detailMeta { color: #aab4c3; }
+.cardDetail .detailAbility { margin-top: 6px; }
+.cardDetail .detailAbility b { color: #ffd43b; }
+.cardDetail ul { margin: 3px 0 0; padding-left: 18px; }

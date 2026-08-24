@@ -21,14 +21,19 @@
   <div class="top">
     <h1>五連戰線｜遠端真人 Alpha</h1>
     <span class="pill">Server Authoritative</span><span class="pill">9×9</span><span class="pill">兩人房</span>
-    <a class="pill" href="/local">本機原型</a>
+    <span class="pill counterHint" title="盾克劍、劍克槍、槍克盾">
+      相剋　<b>🛡盾</b> → <b>⚔劍</b> → <b>🔱槍</b> → <b>🛡盾</b>
+    </span>
+    <button id="helpBtn" class="btn helpBtn" type="button">？ 規則</button>
   </div>
   <div class="panel lobby">
     <span id="socketStatus" class="connection wait">連線中…</span>
     <button id="createBtn" class="btn" disabled>建立房間</button>
     <input id="roomInput" maxlength="6" placeholder="輸入 6 位房號">
     <button id="joinBtn" class="btn" disabled>加入房間</button>
+    <button id="copyRoomBtn" class="btn hidden" type="button">複製房號</button>
     <strong id="roomIdentity"></strong>
+    <button id="backToEntryBtn" class="btn" type="button" style="margin-left:auto">← 返回模式選擇</button>
   </div>
   <div class="layout">
     <div class="gameCol">
@@ -37,6 +42,7 @@
         <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><strong id="handTitle">等待加入房間</strong><span id="deckInfo" class="meta"></span></div>
         <div id="hand" class="hand" style="margin-top:8px"></div>
         <div id="rankRow" class="rankRow"></div>
+        <div id="cardDetail" class="cardDetail">滑鼠移到手牌上（或點選手牌）可看該兵種的詳細能力。</div>
       </div>
     </div>
     <div class="side">
@@ -55,6 +61,34 @@
     </div>
   </div>
 </div>
+<div id="entryOverlay" class="overlay">
+  <div class="overlayBox">
+    <h2>五連戰線　Alpha</h2>
+    <p class="overlaySub">9×9 棋盤。放下的棋子會互相戰鬥，<b>戰鬥結束後仍然存活的五連</b>才算獲勝。</p>
+    <div class="entryChoices">
+      <button id="entryOnlineBtn" class="btn entryBtn" type="button">
+        <span class="entryTitle">連線對戰</span>
+        <span class="entryDesc">建立或加入房間，跟朋友遠端對戰。<br>使用目前的正式規則。</span>
+      </button>
+      <a id="entryLocalBtn" class="btn entryBtn" href="/local">
+        <span class="entryTitle">單機測試</span>
+        <span class="entryDesc">一個人在本機試玩棋盤操作。<br><b class="warnText">注意：本機原型仍是舊版規則，數值與正式對戰不同。</b></span>
+      </a>
+    </div>
+    <button id="entryHelpBtn" class="btn" type="button" style="margin-top:14px">？ 先看規則</button>
+  </div>
+</div>
+
+<div id="rulesOverlay" class="overlay hidden">
+  <div class="overlayBox rulesBox">
+    <div class="rulesHead">
+      <h2>規則與兵種說明</h2>
+      <button id="rulesCloseBtn" class="btn" type="button">關閉</button>
+    </div>
+    <div id="rulesBody" class="rulesBody"></div>
+  </div>
+</div>
+
 <script src="/alpha_client.js"></script>
 </body>
 </html>

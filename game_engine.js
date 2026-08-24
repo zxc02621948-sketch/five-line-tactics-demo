@@ -608,6 +608,23 @@ class GameEngine {
     return { roundResolved: true, gameOver: false };
   }
 
+  // 純顯示用的權威資料：UI 直接讀這裡，不要在前端另外抄一份數值。
+  static unitCatalog() {
+    const catalog = {};
+    for (const type of Object.keys(TYPES)) {
+      catalog[type] = {
+        name: TYPES[type].name,
+        counters: COUNTER[type],
+        counteredBy: Object.keys(COUNTER).find(key => COUNTER[key] === type),
+        ranks: {
+          1: baseStats(type, 1),
+          2: { ...baseStats(type, 2), attacks: type !== "shield" },
+        },
+      };
+    }
+    return catalog;
+  }
+
   visibleStateFor(pid) {
     const own = this.players[pid - 1];
     const opponent = this.players[pid === 1 ? 1 : 0];
@@ -637,6 +654,9 @@ class GameEngine {
       firstPlayer: this.firstPlayerForRound(),
       startingPlayer: this.startingPlayer,
       turnOrderMode: this.turnOrderMode,
+      unitCatalog: GameEngine.unitCatalog(),
+      eliteCardCost: cardCost(2),
+      deathCooldownRounds: 3,
       actionsThisRound: this.actionsThisRound,
       artilleryUsedThisTurn: this.artilleryUsedThisTurn,
       deploymentCommitted: this.deploymentCommitted,
@@ -659,6 +679,9 @@ class GameEngine {
       rules: {
         board: "9x9",
         turnOrderMode: this.turnOrderMode,
+      unitCatalog: GameEngine.unitCatalog(),
+      eliteCardCost: cardCost(2),
+      deathCooldownRounds: 3,
         deck: { sword: 9, shield: 9, spear: 7 },
         artilleryPerPlayer: 2,
         artilleryDamage: { center: 30, outer: 12, friendlyFire: true },
