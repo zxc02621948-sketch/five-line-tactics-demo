@@ -185,8 +185,7 @@
 
   // 卡牌詳情固定在手牌下方，不浮動、不會蓋住棋盤操作區。
   function renderCardDetail() {
-    const box = $("#cardDetail");
-    if (box) box.innerHTML = UI.cardDetailHtml(hoverType || selectedType, catalog());
+    UI.renderCardDetail($("#cardDetail"), hoverType || selectedType, catalog());
   }
 
   function renderLogs() {

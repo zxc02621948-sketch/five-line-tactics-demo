@@ -150,22 +150,53 @@
 .rulesBody th, .rulesBody td { border: 1px solid #343d4d; padding: 5px 8px; text-align: left; }
 .rulesBody th { color: #aab4c3; font-weight: 600; }
 
-/* 手牌小卡的數值列 */
-.card { min-width: 92px; }
-.cardStats { display: block; font-size: 11px; color: #aab4c3; margin-top: 3px; line-height: 1.5; }
+/* ---- 版面定位：任何面板的內容變化都不得推擠其他區塊 ---- */
+/* 手牌小卡固定尺寸，內容多寡不改變列高 */
+.card {
+  width: 96px; min-width: 96px; height: 124px;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  overflow: hidden;
+}
+.cardStats { display: block; font-size: 11px; color: #aab4c3; margin-top: 3px; line-height: 1.45; }
 .cardTag {
-  display: inline-block; margin-top: 4px; padding: 1px 6px; border-radius: 999px;
+  display: inline-block; margin-top: auto; padding: 1px 6px; border-radius: 999px;
   background: #2f3b52; border: 1px solid #4b5870; font-size: 10px; color: #dbe4f0;
+  white-space: nowrap;
 }
 
-/* 卡牌詳情：固定在手牌下方，不會蓋住棋盤 */
+/* 星級選擇列永遠佔位；選牌前後高度不變 */
+.rankRow { min-height: 40px; align-items: flex-start; }
+
+/* 手牌面板是大卡的定位基準，且高度固定 */
+.handPanel { position: relative; }
+
+/* 卡牌詳情＝浮在手牌上方的大卡。position:absolute 讓它完全不參與版面流，
+   出現或消失都不會推動棋盤與其他區塊。尺寸固定，內容多的兵種內部捲動。 */
 .cardDetail {
-  margin-top: 10px; padding: 10px 12px; border-radius: 10px;
-  background: #111722; border: 1px solid #343d4d;
-  font-size: 12px; line-height: 1.8; color: #dbe4f0; min-height: 64px;
+  position: absolute;
+  left: 12px;
+  bottom: calc(100% + 10px);
+  z-index: 40;
+  width: 420px;
+  height: 300px;
+  overflow: auto;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #131a26;
+  border: 1px solid #4b5870;
+  box-shadow: 0 14px 40px #000b;
+  font-size: 13px; line-height: 1.85; color: #dbe4f0;
 }
-.cardDetail .detailHead { font-size: 14px; font-weight: 800; margin-bottom: 4px; }
-.cardDetail .detailMeta { color: #aab4c3; }
-.cardDetail .detailAbility { margin-top: 6px; }
+.cardDetail.idle { display: none; }
+.cardDetail .detailHead { font-size: 17px; font-weight: 800; margin-bottom: 6px; }
+.cardDetail .detailMeta { color: #aab4c3; font-size: 12px; }
+.cardDetail .detailAbility { margin-top: 10px; }
 .cardDetail .detailAbility b { color: #ffd43b; }
-.cardDetail ul { margin: 3px 0 0; padding-left: 18px; }
+.cardDetail ul { margin: 4px 0 0; padding-left: 18px; }
+
+/* 固定不動的操作提示，取代原本會變高的說明區塊 */
+.handHint { font-size: 11px; color: #7e8a9b; white-space: nowrap; }
+
+@media (max-width: 720px) {
+  .cardDetail { left: 8px; right: 8px; width: auto; height: 260px; }
+}

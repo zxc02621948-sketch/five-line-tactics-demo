@@ -99,8 +99,7 @@
   }
 
   function renderCardDetail() {
-    const box = $("#cardDetail");
-    if (box) box.innerHTML = UI.cardDetailHtml(hoverType || selectedType, catalog());
+    UI.renderCardDetail($("#cardDetail"), hoverType || selectedType, catalog());
   }
 
   function renderLogs() {

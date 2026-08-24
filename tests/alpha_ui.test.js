@@ -188,7 +188,7 @@ test("單機與連線的兵種說明來自同一個共用模組", () => {
   assert.match(sharedUi, /const ELITE_ABILITY = \{/);
   for (const [label, text] of [["alpha_client.js", client], ["local_client.js", localClient]]) {
     assert.doesNotMatch(text, /const ELITE_ABILITY|const ABILITY = |function rulesHtml/, `${label} 不應自帶文案`);
-    assert.match(text, /UI\.cardDetailHtml\(/, `${label} 必須使用共用的詳情`);
+    assert.match(text, /UI\.renderCardDetail\(/, `${label} 必須使用共用的詳情`);
     assert.match(text, /UI\.wireRulesOverlay\(/, `${label} 必須使用共用的規則視窗`);
     assert.match(text, /UI\.handCardHtml\(/, `${label} 必須使用共用的手牌小卡`);
   }
@@ -276,11 +276,47 @@ test("卡牌詳情不破壞原本的選牌與部署流程", () => {
   for (const [label, text] of [["alpha_client.js", client], ["local_client.js", localClient]]) {
     assert.match(text, /button\.onclick = \(\) => \{ selectedType = type; selectedRank = 1; artilleryMode = false; render\(\); \};/,
       `${label} 的點擊必須維持只做選牌`);
-    const hover = text.match(/button\.addEventListener\("mouseenter"[^\n]*/)[0];
+    const hover = text.match(/button\.addEventListener\("mouseenter".*/)[0];
     assert.doesNotMatch(hover, /selectedType/, `${label} 的 hover 不得改變已選卡`);
   }
-  for (const page of [html, localHtml]) assert.match(page, /<div id="cardDetail" class="cardDetail">/);
-  assert.doesNotMatch(css.match(/\.cardDetail \{[\s\S]*?\}/)[0], /position:\s*(fixed|absolute)/);
+  for (const page of [html, localHtml]) {
+    assert.match(page, /<div id="cardDetail" class="cardDetail idle"><\/div>/, "詳情卡初始必須是隱藏且無內容");
+  }
+});
+
+test("版面不得跳動：會變動內容的區塊都有固定尺寸或不佔版面", () => {
+  // name 形如 ".cardDetail"；取出該 selector 的整段宣告
+  const rule = name => {
+    const match = css.match(new RegExp("\\" + name + "\\s*\\{[^}]*\\}"));
+    assert.ok(match, `alpha_board.css 找不到 ${name} 的樣式`);
+    return match[0];
+  };
+
+  // 1. 詳情大卡必須完全不參與版面流，出現與消失都不推擠棋盤
+  const detail = rule(".cardDetail");
+  assert.match(detail, /position:\s*absolute/, "詳情卡必須 absolute，才不會撐開手牌區");
+  assert.match(detail, /width:\s*\d+px/, "詳情卡寬度必須固定");
+  assert.match(detail, /height:\s*\d+px/, "詳情卡高度必須固定，內容多寡不得改變尺寸");
+  assert.match(detail, /overflow:\s*auto/, "內容超出時應內部捲動而非撐高");
+  assert.match(css, /\.cardDetail\.idle\s*\{\s*display:\s*none/, "沒有目標時必須整張隱藏");
+
+  // 2. 星級選擇列永遠佔位；選牌前後高度不變
+  assert.match(rule(".rankRow"), /min-height:\s*\d+px/, "星級列必須預留固定高度");
+
+  // 3. 手牌小卡尺寸固定，不同兵種不得造成列高變化
+  const card = rule(".card");
+  assert.match(card, /width:\s*\d+px/);
+  assert.match(card, /height:\s*\d+px/);
+
+  // 4. 定位基準存在，且不得裁切浮出的大卡
+  for (const [label, page] of [["alpha.html", html], ["index.html", localHtml]]) {
+    assert.match(page, /class="[^"]*handPanel[^"]*"/, `${label} 需要 handPanel 作為定位基準`);
+  }
+  assert.match(css, /\.handPanel\s*\{[^}]*position:\s*relative/);
+  assert.doesNotMatch(localHtml, /\.handPanel\{[^}]*overflow:\s*hidden/, "handPanel 不得裁切浮出的大卡");
+
+  // 5. 棋盤尺寸不得依賴手牌區高度的魔術數字
+  assert.doesNotMatch(localHtml, /calc\(100vh - 230px\)/, "棋盤不應再用寫死的視窗高度推算");
 });
 
 test("觸控裝置不依賴 hover：點選手牌即可看到同一份詳情", () => {

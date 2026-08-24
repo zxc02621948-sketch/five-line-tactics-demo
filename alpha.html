@@ -38,11 +38,11 @@
   <div class="layout">
     <div class="gameCol">
       <div class="panel boardWrap"><div id="board" class="board"></div></div>
-      <div class="panel" style="margin-top:12px">
-        <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><strong id="handTitle">等待加入房間</strong><span id="deckInfo" class="meta"></span></div>
+      <div class="panel handPanel" style="margin-top:12px">
+        <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><strong id="handTitle">等待加入房間</strong><span id="deckInfo" class="meta"></span><span class="handHint">滑鼠移到手牌（或點選）可看兵種大卡</span></div>
         <div id="hand" class="hand" style="margin-top:8px"></div>
         <div id="rankRow" class="rankRow"></div>
-        <div id="cardDetail" class="cardDetail">滑鼠移到手牌上（或點選手牌）可看該兵種的詳細能力。</div>
+        <div id="cardDetail" class="cardDetail idle"></div>
       </div>
     </div>
     <div class="side">

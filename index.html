@@ -44,12 +44,17 @@
     background:var(--panel);border:1px solid #2b3240;border-radius:14px;
   }
   .boardWrap{
-    min-height:0;padding:10px;display:flex;align-items:center;justify-content:center;overflow:hidden;
+    min-height:0;padding:10px;display:grid;place-items:center;overflow:hidden;
+    container-type:size;
   }
+  /* 取容器寬高的較小值 → 永遠是能放進去的最大正方形。
+     手牌區高度改變只會改變容器高度，棋盤跟著等比縮放，不會被壓成扁條。 */
   .board{
     display:grid;grid-template-columns:repeat(9,1fr);
-    width:min(100%,calc(100vh - 230px));height:auto;aspect-ratio:1/1;
-    max-width:100%;max-height:100%;margin:auto;border:1px solid var(--grid);background:#0f1218;
+    width:min(100%,62vh);            /* 後備：不支援容器查詢時 */
+    width:min(100cqw,100cqh);
+    height:auto;aspect-ratio:1/1;
+    border:1px solid var(--grid);background:#0f1218;
   }
   .cell{
     position:relative;border-right:1px solid var(--grid);border-bottom:1px solid var(--grid);
@@ -81,7 +86,8 @@
   .section h3{font-size:14px;margin:0 0 8px;color:#cbd5e1}
   .turn{font-size:18px;font-weight:800}
   .turn.p1t{color:var(--p1)} .turn.p2t{color:var(--p2)}
-  .handPanel{padding:9px 10px;overflow:hidden}
+  .handPanel{padding:9px 10px}
+  .hand{overflow:hidden}
   .hand{display:flex;gap:7px;flex-wrap:nowrap;overflow-x:auto;padding-bottom:2px}
   .card{
     flex:0 0 62px;min-height:76px;border-radius:10px;border:2px solid #455065;background:#202632;
@@ -122,7 +128,7 @@
     .layout{grid-template-columns:1fr;overflow:visible}
     .gameCol{display:block}
     .boardWrap{height:min(92vw,72vh)}
-    .board{width:min(100%,92vw);max-height:none}
+    .board{height:auto;width:min(100%,92vw);max-height:none}
     .handPanel{margin-top:10px}
     .side{max-height:none;overflow:visible;margin-top:10px}
   }
@@ -165,10 +171,11 @@
         <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
           <strong id="handTitle">手牌</strong>
           <span class="meta" id="deckInfo"></span>
+          <span class="handHint">滑鼠移到手牌（或點選）可看兵種大卡</span>
         </div>
         <div id="hand" class="hand" style="margin-top:8px"></div>
         <div id="rankRow" class="rankRow"></div>
-        <div id="cardDetail" class="cardDetail">滑鼠移到手牌上（或點選手牌）可看該兵種的詳細能力。</div>
+        <div id="cardDetail" class="cardDetail idle"></div>
       </div>
     </div>
 

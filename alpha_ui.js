@@ -137,6 +137,15 @@
       </ul>`;
   }
 
+  // 大卡詳情：沒有目標時整張卡隱藏（.idle），有目標才浮出。
+  // 因為 .cardDetail 是 absolute，出現與消失都不會推擠版面。
+  function renderCardDetail(box, type, catalog) {
+    if (!box) return;
+    if (!type || !catalog) { box.classList.add("idle"); box.innerHTML = ""; return; }
+    box.classList.remove("idle");
+    box.innerHTML = cardDetailHtml(type, catalog);
+  }
+
   // 規則視窗的開關（兩邊共用；只切 CSS class，不動遊戲狀態）
   function wireRulesOverlay(getCatalog) {
     const overlay = document.querySelector("#rulesOverlay");
@@ -157,6 +166,6 @@
 
   globalThis.AlphaUI = {
     ICONS, NAMES, SHORT_TAG, ELITE_TAG, ABILITY, ELITE_ABILITY,
-    handCardHtml, unitHtml, unitTitle, cardDetailHtml, rulesHtml, wireRulesOverlay,
+    handCardHtml, unitHtml, unitTitle, cardDetailHtml, renderCardDetail, rulesHtml, wireRulesOverlay,
   };
 })();
