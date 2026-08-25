@@ -478,28 +478,50 @@ test("對局進行中隱藏模式切換，但「重開」永遠留著", () => {
   assert.match(localClient, /\$\("#resetBtn"\)\.classList\.remove\("hidden"\)/);
 });
 
-test("無法部署由正式引擎結束，UI 不再要求玩家手動解死局", () => {
-  assert.match(localClient, /const canAct = \(\)[\s\S]{0,160}hand\.length > 0 && engine\.hasEmptyCell\(\)/);
-  assert.match(localClient, /引擎將依補給耗盡或棋盤已滿規則結束本局/);
-  assert.match(sharedUi, /無法部署時/);
-  assert.match(sharedUi, /雙方補給同時耗盡/);
+test("手牌用盡時 UI 提供移動，不要求玩家手動解死局", () => {
+  // 能不能行動一律問引擎，前端不自己判斷
+  assert.match(localClient, /const canAct = \(\)[\s\S]{0,120}engine\.canAct\(engine\.current\)/);
+  assert.match(localClient, /engine\.legalMoves\(engine\.current\)/);
+  assert.match(localClient, /engine\.move\(engine\.current, \{ r: fr, c: fc, toR: r, toC: c/);
+  // 兩段式操作：先點自己的棋、再點相鄰空格
+  assert.match(localClient, /請先點自己的一顆棋，再點相鄰空格|點自己的一顆棋，再點相鄰空格/);
+  assert.match(localClient, /點上下左右相鄰的空格移動/);
+  // 規則說明要講清楚這是替代行動
+  assert.match(sharedUi, /手牌用盡時/);
+  assert.match(sharedUi, /移動自己的一顆棋/);
+  assert.match(sharedUi, /自動跳過<\/b>，不判輸/);
+  // 舊的死局文案與已移除的終局原因都不該再出現
   assert.doesNotMatch(localClient, /目前規則沒有這個局面的解法/);
+  assert.doesNotMatch(localClient, /補給耗盡/);
+  assert.doesNotMatch(sharedUi, /補給同時耗盡|棋盤已滿：本局平手/);
+  // 連線端要送得出 move
+  assert.match(server, /intent\.kind === "move"[\s\S]{0,60}room\.game\.move/);
 });
 
-test("引擎不再留下「不能行動但 gameOver 為 false」的局面", () => {
-  // 確定性地掃前 200 個種子；一路隨機落子，任何無法部署都必須已正式終局。
+test("沒牌時改用移動，引擎不會留下「不能行動但 gameOver 為 false」的局面", () => {
+  // 確定性地掃前 200 個種子。驅動程式優先部署，沒牌就改用移動——
+  // 這正是新規則要求玩家做的事；兩者皆不可行時引擎必須自己跳過。
   const playSeed = start => {
     let seed = start >>> 0;
     const rnd = max => { seed = (seed * 1664525 + 1013904223) >>> 0; return Math.floor((seed / 4294967296) * max); };
     const engine = new GameEngine({ roomCode: "STUCK", turnOrderMode: "fixed", startingPlayer: 1, randomInt: rnd });
     let guard = 0;
     while (!engine.gameOver && guard++ < 400) {
-      const hand = engine.players[engine.current - 1].hand;
-      if (!hand.length || !engine.hasEmptyCell()) return { engine, stuck: !engine.gameOver };
-      const empties = [];
-      for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!engine.board[r][c]) empties.push([r, c]);
-      const [r, c] = empties[rnd(empties.length)];
-      if (!engine.deploy(engine.current, { r, c, type: hand[0], rank: 1, turnId: engine.turnId }).ok) break;
+      const pid = engine.current;
+      if (engine.canDeploy(pid)) {
+        const empties = [];
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!engine.board[r][c]) empties.push([r, c]);
+        const [r, c] = empties[rnd(empties.length)];
+        const hand = engine.players[pid - 1].hand;
+        if (!engine.deploy(pid, { r, c, type: hand[0], rank: 1, turnId: engine.turnId }).ok) break;
+        continue;
+      }
+      const moves = engine.legalMoves(pid);
+      // 引擎會自動跳過沒有合法移動的一方，所以這裡不該看到「輪到一個動不了的人」
+      if (!moves.length) return { engine, stuck: !engine.gameOver };
+      const pick = moves[rnd(moves.length)];
+      if (!engine.move(pid, { r: pick.from[0], c: pick.from[1],
+        toR: pick.to[0], toC: pick.to[1], turnId: engine.turnId }).ok) break;
     }
     return { engine, stuck: false };
   };
@@ -508,9 +530,8 @@ test("引擎不再留下「不能行動但 gameOver 為 false」的局面", () =
     const result = playSeed(1234 + i * 7919);
     if (result.stuck) stuck.push(result);
   }
-  assert.equal(stuck.length, 0, "任何不能部署的局面都必須已有正式終局結果");
+  assert.equal(stuck.length, 0, "沒牌時要嘛能移動，要嘛由引擎自動跳過，不該卡住");
 });
-
 test("棄賽會結束對局且不修改引擎規則", () => {
   assert.match(localClient, /\$\("#resignBtn"\)\.onclick/);
   assert.match(localClient, /const finished = \(\) => Boolean\(resigned\)/);
@@ -729,4 +750,29 @@ test("警示條有固定佔位，不會因出現或消失擠壓其他元件", ()
     assert.doesNotMatch(text, /turnText"\)\.textContent[^;]*phase\.text/,
       `${name} 不可以把警示塞進 nowrap+ellipsis 的 turnText`);
   }
+});
+
+test("連線端也要能移動，而且規則參數來自 server 送的 state", () => {
+  assert.match(client, /function moveMode\(\)/);
+  assert.match(client, /state\.own\.hand\.length > 0/, "有手牌時不進入移動模式");
+  assert.match(client, /sendIntent\(\{ kind: "move", r: fr, c: fc, toR: r, toC: c \}\)/);
+  // 收到新 state 要清掉暫存的移動起點，否則會拿舊座標送出
+  assert.match(client, /artilleryMode = false; moveFrom = null;/);
+  // 引擎必須把移動規則送給前端，前端不自己抄
+  const state = fixed().visibleStateFor(1);
+  assert.deepEqual(state.movementRules, GameEngine.movementRules());
+  assert.equal(state.movementRules.onlyWhenCannotDeploy, true);
+});
+
+test("移動是替代行動：有牌時不得移動，沒牌沒棋時自動跳過", () => {
+  const engine = fixed();
+  // 開局有手牌 → 不可移動
+  assert.equal(engine.canDeploy(1), true);
+  assert.deepEqual(engine.legalMoves(1), []);
+  // 手牌清空後，場上有棋才有得走
+  engine.players[0].hand = [];
+  engine.players[0].deck = [];
+  assert.equal(engine.legalMoves(1).length, 0, "場上還沒有棋子時無處可移");
+  assert.equal(engine.canAct(1), false, "此時無法行動，應由引擎自動跳過");
+  assert.equal(engine.gameOver, false, "但不判輸");
 });

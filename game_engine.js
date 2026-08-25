@@ -41,6 +41,9 @@ const PASSIVITY_FORFEIT_ROUNDS = 3;
 // 緩衝輪數過後每輪全盤扣 maxHP 的固定比例。基準必須是 maxHp——
 // 用當前 HP 是指數衰減，永遠殺不死單位，加賽不會結束。
 const OVERTIME_RULES = Object.freeze({ graceRounds: 3, decayRate: 0.10, decayBasis: "maxHp" });
+// 手牌用完時的唯一出路：把自己的一顆棋往正交相鄰的空格移動一格。
+// 這不是通用移動系統——有牌可以部署時不能移動。
+const MOVE_RULES = Object.freeze({ range: 1, orthogonalOnly: true, onlyWhenCannotDeploy: true });
 const ORTHOGONAL = Object.freeze([[1, 0], [-1, 0], [0, 1], [0, -1]]);
 const FIVE_DIRECTIONS = Object.freeze([[1, 0], [0, 1], [1, 1], [1, -1]]);
 
@@ -264,6 +267,34 @@ class GameEngine {
     return { ok: true, action, transition };
   }
 
+  // 沒牌可放時的替代行動：移動一格。與部署一樣佔掉本回合的行動。
+  move(pid, { r, c, toR, toC, turnId }) {
+    const actorError = this.validateActor(pid, turnId);
+    if (actorError) return { ok: false, error: actorError };
+    if (this.deploymentCommitted) return { ok: false, error: "本回合已完成行動" };
+    if (this.canDeploy(pid)) return { ok: false, error: "手牌還有可部署的兵，本回合不能改用移動" };
+    if (!inBounds(r, c) || !inBounds(toR, toC)) return { ok: false, error: "移動位置超出棋盤" };
+    const unit = this.board[r][c];
+    if (!unit) return { ok: false, error: "起點沒有單位" };
+    if (unit.pid !== pid) return { ok: false, error: "只能移動自己的單位" };
+    if (this.board[toR][toC]) return { ok: false, error: "目標格已有單位" };
+    if (Math.abs(r - toR) + Math.abs(c - toC) !== MOVE_RULES.range) {
+      return { ok: false, error: "一次只能往正交相鄰的空格移動一格" };
+    }
+
+    this.board[toR][toC] = unit;
+    this.board[r][c] = null;
+    this.deploymentCommitted = true;
+    const action = { kind: "move", pid, r, c, toR, toC, unitId: unit.id };
+    this.ensureRoundRecord().actions.push(action);
+    this.addLog(pid === 1 ? "r" : "b",
+      `P${pid} 手牌用盡，將 ${"★".repeat(unit.rank)}${TYPES[unit.type].name} 從 (${r + 1},${c + 1}) 移動到 (${toR + 1},${toC + 1})`,
+      action);
+    const transition = this.finishDeployment();
+    this.auditCardConservation(`move_p${pid}`);
+    return { ok: true, action, transition };
+  }
+
   artillery(pid, { r, c, turnId }) {
     const actorError = this.validateActor(pid, turnId);
     if (actorError) return { ok: false, error: actorError };
@@ -326,58 +357,31 @@ class GameEngine {
     return this.board.some(row => row.some(unit => !unit));
   }
 
-  // 在下一次自己的回合開始時，這名玩家是否能取得至少一張可部署的牌。
-  // 手牌與牌庫可直接使用；冷卻只計入下一次 ownerTurnStart 會歸零的牌。
-  canDeployOnNextOwnTurn(pid) {
-    if (!this.hasEmptyCell()) return false;
-    const player = this.players[pid - 1];
-    return player.hand.length > 0
-      || player.deck.length > 0
-      || player.cooldown.some(item => item.turns <= 1);
+  // 有手牌又有空格才算「能部署」。
+  canDeploy(pid) {
+    return this.players[pid - 1].hand.length > 0 && this.hasEmptyCell();
   }
 
-  concludeNoDeployment({ betweenRounds, roundResolved }) {
-    let winner = null;
-    let endReason = null;
-    let text = "";
-    let data = null;
-
-    if (!this.hasEmptyCell()) {
-      winner = "draw";
-      endReason = "board_full";
-      text = "棋盤已滿，雙方都無法再部署：本局平手。";
-    } else if (betweenRounds) {
-      const available = {
-        1: this.canDeployOnNextOwnTurn(1),
-        2: this.canDeployOnNextOwnTurn(2),
-      };
-      data = { available };
-      if (available[1] && available[2]) return null;
-      if (!available[1] && !available[2]) {
-        winner = "draw";
-        endReason = "supply_exhausted_both";
-        text = "雙方下一回合都無兵可部署：補給同時耗盡，本局平手。";
-      } else {
-        winner = available[1] ? 1 : 2;
-        endReason = "opponent_supply_exhausted";
-        text = `P${3 - winner} 下一回合無兵可部署：P${winner} 獲勝。`;
+  // 手牌用完時的合法移動：自己的棋往正交相鄰的空格走一格。
+  // 還有牌可以部署時一律回空陣列——移動是沒牌時的替代行動，不是額外行動。
+  legalMoves(pid) {
+    if (this.canDeploy(pid)) return [];
+    const moves = [];
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+      const unit = this.board[r][c];
+      if (!unit || unit.pid !== pid) continue;
+      for (const [dr, dc] of ORTHOGONAL) {
+        const nr = r + dr, nc = c + dc;
+        if (inBounds(nr, nc) && !this.board[nr][nc]) moves.push({ from: [r, c], to: [nr, nc] });
       }
-    } else {
-      // 回應方已執行 ownerTurnStart；此時仍沒有手牌，就確定無法完成本輪行動。
-      if (this.players[this.current - 1].hand.length > 0) return null;
-      winner = this.current === 1 ? 2 : 1;
-      endReason = "opponent_supply_exhausted";
-      data = { blockedPlayer: this.current };
-      text = `P${this.current} 補牌後仍無兵可部署：P${winner} 獲勝。`;
     }
+    return moves;
+  }
 
-    this.gameOver = true;
-    this.winner = winner;
-    this.endReason = endReason;
-    this.endedAt = new Date().toISOString();
-    this.finalFive = { p1: this.fiveLines(1), p2: this.fiveLines(2) };
-    this.addLog("winner", text, { endReason, ...(data || {}) });
-    return { roundResolved, gameOver: true, winner, endReason };
+  // 這一方本回合有沒有任何合法行動。兩者皆無時自動跳過，不判輸——
+  // 牌是守恆的，單位活在場上就等於那張牌不在手上，若判輸等於懲罰守得好的一方。
+  canAct(pid) {
+    return this.canDeploy(pid) || this.legalMoves(pid).length > 0;
   }
 
   attackTargets(r, c, unit) {
@@ -679,6 +683,19 @@ class GameEngine {
   }
 
   finishDeployment() {
+    let result = this.advanceAfterAction();
+    // 沒牌可放、又沒有任何合法移動的一方只能跳過。這個迴圈一定會停：
+    // 要嘛有交戰（單位陣亡 → 牌經冷卻回流），要嘛雙方連續零交戰而
+    // 觸發消極判負。guard 只是防呆，正常不會用到。
+    let guard = 0;
+    while (!this.gameOver && !this.canAct(this.current) && guard++ < 200) {
+      this.addLog("sys", `P${this.current} 沒有手牌、也沒有可移動的棋子：跳過本回合。`);
+      result = this.advanceAfterAction();
+    }
+    return result;
+  }
+
+  advanceAfterAction() {
     this.actionsThisRound++;
     // A normal action consumes its server-issued turn ticket immediately. This
     // also protects round boundaries where the same player acts again first.
@@ -688,8 +705,6 @@ class GameEngine {
       this.artilleryUsedThisTurn = false;
       this.deploymentCommitted = false;
       this.ownerTurnStart(this.current);
-      const noDeployment = this.concludeNoDeployment({ betweenRounds: false, roundResolved: false });
-      if (noDeployment) return noDeployment;
       this.addLog("sys", `第 ${this.roundNo} 輪換 P${this.current} 行動。`);
       return { roundResolved: false };
     }
@@ -744,11 +759,6 @@ class GameEngine {
         { overtimeStartRound: this.roundNo });
     }
 
-    // 五連、消極判負與加賽狀態都處理完後，才判斷下一輪是否仍有合法部署。
-    // 兩邊都沒牌或棋盤已滿時判平手；只有一邊斷糧時由另一邊獲勝。
-    const noDeployment = this.concludeNoDeployment({ betweenRounds: true, roundResolved: true });
-    if (noDeployment) return noDeployment;
-
     this.roundNo++;
     this.actionsThisRound = 0;
     this.current = this.firstPlayerForRound();
@@ -787,12 +797,9 @@ class GameEngine {
     return { perPlayer: 2, radius: 1, center: 30, outer: 12, friendlyFire: true };
   }
 
-  static terminalRules() {
-    return {
-      boardFull: "draw",
-      bothSupplyExhausted: "draw",
-      oneSupplyExhausted: "opponent_wins",
-    };
+  // 純顯示用：沒牌時的移動規則，UI 不要自己抄。
+  static movementRules() {
+    return { ...MOVE_RULES, skipWhenNoLegalMove: true };
   }
 
   visibleStateFor(pid) {
@@ -826,7 +833,7 @@ class GameEngine {
       turnOrderMode: this.turnOrderMode,
       unitCatalog: GameEngine.unitCatalog(),
       artilleryRules: GameEngine.artilleryRules(),
-      terminalRules: GameEngine.terminalRules(),
+      movementRules: GameEngine.movementRules(),
       eliteCardCost: cardCost(2),
       deathCooldownRounds: 3,
       actionsThisRound: this.actionsThisRound,
@@ -873,7 +880,7 @@ class GameEngine {
           ...OVERTIME_RULES,
         },
         passivityForfeit: { quietRounds: PASSIVITY_FORFEIT_ROUNDS, result: "double_loss" },
-        noLegalDeployment: GameEngine.terminalRules(),
+        noCardsFallback: { ...GameEngine.movementRules(), result: "跳過該回合，不判輸" },
         eliteAbilities: {
           sword: "斬入：親自擊殺目標後強制移入死亡格，對相鄰最低HP敵人追擊 100% base ATK（套互剋、不套決鬥）",
           shield: "不主動攻擊；相鄰非盾友軍 50% 傷害轉移；對自身實際承受傷害 100% 反震",
@@ -896,6 +903,6 @@ class GameEngine {
   }
 }
 
-const FiveLineEngine = { GameEngine, TYPES, DECK_TEMPLATE, baseStats, cardCost, ALPHA_TURN_ORDER, OVERTIME_RULES, PASSIVITY_FORFEIT_ROUNDS };
+const FiveLineEngine = { GameEngine, TYPES, DECK_TEMPLATE, baseStats, cardCost, ALPHA_TURN_ORDER, OVERTIME_RULES, PASSIVITY_FORFEIT_ROUNDS, MOVE_RULES };
 if (typeof module !== "undefined" && module.exports) module.exports = FiveLineEngine;
 if (typeof globalThis !== "undefined") globalThis.FiveLineEngine = FiveLineEngine;

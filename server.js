@@ -261,6 +261,7 @@ async function handleAction(ws, message) {
   const intent = message.intent || {};
   let result;
   if (intent.kind === "deploy") result = room.game.deploy(session.pid, intent);
+  else if (intent.kind === "move") result = room.game.move(session.pid, intent);
   else if (intent.kind === "artillery") result = room.game.artillery(session.pid, intent);
   else result = { ok: false, error: "未知操作" };
   const response = result.ok

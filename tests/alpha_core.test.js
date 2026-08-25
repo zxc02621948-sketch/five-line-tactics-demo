@@ -694,5 +694,6 @@ test("40 加賽與消極判負的參數只有一份，UI 讀引擎不自己抄",
   assert.equal(report.rules.overtime.deployDuringOvertime, true);
   assert.equal(report.rules.passivityForfeit.quietRounds, 3);
   assert.equal(report.rules.passivityForfeit.result, "double_loss");
-  assert.deepEqual(report.rules.noLegalDeployment, GameEngine.terminalRules());
+  assert.deepEqual(report.rules.noCardsFallback,
+    { ...GameEngine.movementRules(), result: "跳過該回合，不判輸" });
 });

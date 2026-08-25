@@ -152,11 +152,13 @@
         <li>★★ 陣亡時，3 張卡會一起進冷卻。</li>
       </ul>
 
-      <h3>無法部署時</h3>
+      <h3>手牌用盡時</h3>
       <ul>
-        <li>只有一方在下一次行動補牌後仍無兵可部署時，判定<b>另一方獲勝</b>。</li>
-        <li>雙方補給同時耗盡，或棋盤已滿、雙方都無法再部署時，判定<b>平手</b>。</li>
-        <li>此判定由正式引擎自動完成，不需要玩家手動重開。</li>
+        <li>輪到你但手牌已空時，改為<b>移動自己的一顆棋</b>：往上下左右相鄰的空格走一格。</li>
+        <li>移動<b>取代</b>本回合的部署，不是額外行動；還有手牌可以部署時不能改用移動。</li>
+        <li>移動照樣佔掉本回合，之後照常結算戰鬥。</li>
+        <li>沒牌又沒有任何可移動的棋子時，這一回合<b>自動跳過</b>，不判輸。</li>
+        <li>陣亡單位的牌會在冷卻後回到牌庫，所以「沒牌」只是暫時的。</li>
       </ul>
 
       <h3>炮擊</h3>
@@ -428,18 +430,12 @@
   }
 
   // 單機與連線共用的終局文案；endReason 由權威引擎提供，避免兩端各自猜測。
+  // 單機與連線共用的終局文案；endReason 由權威引擎提供，避免兩端各自猜測。
   function resultLabel(view) {
     if (!view || !view.gameOver) return "";
     if (view.winner === "double_loss") return "消極對局：雙方棄賽";
-    if (view.winner === "draw") {
-      if (view.endReason === "board_full") return "棋盤已滿：本局平手";
-      if (view.endReason === "supply_exhausted_both") return "雙方補給同時耗盡：本局平手";
-      return "本局平手";
-    }
-    if (view.endReason === "opponent_supply_exhausted") {
-      return `P${view.winner} 獲勝（對手無兵可部署）`;
-    }
-    return `P${view.winner} 獲勝`;
+    if (view.winner === "draw") return "雙方同輪五連：平手";
+    return `P${view.winner} 獲勝${view.endReason === "five_line" && view.overtime ? "（加賽）" : ""}`;
   }
 
   globalThis.AlphaUI = {

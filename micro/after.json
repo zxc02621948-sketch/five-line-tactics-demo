@@ -1,0 +1,375 @@
+{
+ "duelCounter": [
+  {
+   "key": "盾→劍",
+   "defDeath": 5,
+   "atkDeaths": 1,
+   "placed": 1,
+   "survivors": [],
+   "mutual": true,
+   "killed": true
+  },
+  {
+   "key": "劍→槍",
+   "defDeath": 3,
+   "atkDeaths": 0,
+   "placed": 1,
+   "survivors": [
+    {
+     "side": "攻",
+     "label": "★劍",
+     "hp": 48
+    }
+   ],
+   "mutual": false,
+   "killed": true
+  },
+  {
+   "key": "槍→盾",
+   "defDeath": 5,
+   "atkDeaths": 0,
+   "placed": 1,
+   "survivors": [
+    {
+     "side": "攻",
+     "label": "★槍",
+     "hp": 20
+    }
+   ],
+   "mutual": false,
+   "killed": true
+  }
+ ],
+ "duelMirror": [
+  {
+   "key": "劍 vs 劍",
+   "defDeath": 4,
+   "atkDeaths": 1,
+   "placed": 1,
+   "survivors": [],
+   "mutual": true,
+   "killed": true
+  },
+  {
+   "key": "盾 vs 盾",
+   "defDeath": 8,
+   "atkDeaths": 1,
+   "placed": 1,
+   "survivors": [],
+   "mutual": true,
+   "killed": true
+  },
+  {
+   "key": "槍 vs 槍",
+   "defDeath": 5,
+   "atkDeaths": 1,
+   "placed": 1,
+   "survivors": [],
+   "mutual": true,
+   "killed": true
+  }
+ ],
+ "siege1": [
+  {
+   "key": "★劍 ← 2×★盾",
+   "defDeath": 3,
+   "atkDeaths": 0,
+   "placed": 2,
+   "survivors": [
+    {
+     "side": "攻",
+     "label": "★盾",
+     "hp": 100
+    },
+    {
+     "side": "攻",
+     "label": "★盾",
+     "hp": 136
+    }
+   ],
+   "mutual": false,
+   "killed": true,
+   "minClean": 2
+  },
+  {
+   "key": "★劍 ← 3×★盾",
+   "defDeath": 3,
+   "atkDeaths": 0,
+   "placed": 3,
+   "survivors": [
+    {
+     "side": "攻",
+     "label": "★盾",
+     "hp": 104
+    },
+    {
+     "side": "攻",
+     "label": "★盾",
+     "hp": 152
+    },
+    {
+     "side": "攻",
+     "label": "★盾",
+     "hp": 140
+    }
+   ],
+   "mutual": false,
+   "killed": true,
+   "minClean": 2
+  },
+  {
+   "key": "★槍 ← 2×★劍",
+   "defDeath": 2,
+   "atkDeaths": 0,
+   "placed": 2,
+   "survivors": [
+    {
+     "side": "攻",
+     "label": "★劍",
+     "hp": 84
+    },
+    {
+     "side": "攻",
+     "label": "★劍",
+     "hp": 108
+    }
+   ],
+   "mutual": false,
+   "killed": true,
+   "minClean": 1
+  },
+  {
+   "key": "★槍 ← 3×★劍",
+   "defDeath": 2,
+   "atkDeaths": 0,
+   "placed": 2,
+   "survivors": [
+    {
+     "side": "攻",
+     "label": "★劍",
+     "hp": 84
+    },
+    {
+     "side": "攻",
+     "label": "★劍",
+     "hp": 108
+    }
+   ],
+   "mutual": false,
+   "killed": true,
+   "minClean": 1
+  },
+  {
+   "key": "★盾 ← 2×★槍",
+   "defDeath": 3,
+   "atkDeaths": 0,
+   "placed": 2,
+   "survivors": [
+    {
+     "side": "攻",
+     "label": "★槍",
+     "hp": 80
+    },
+    {
+     "side": "攻",
+     "label": "★槍",
+     "hp": 100
+    }
+   ],
+   "mutual": false,
+   "killed": true,
+   "minClean": 1
+  },
+  {
+   "key": "★盾 ← 3×★槍",
+   "defDeath": 3,
+   "atkDeaths": 0,
+   "placed": 3,
+   "survivors": [
+    {
+     "side": "攻",
+     "label": "★槍",
+     "hp": 83
+    },
+    {
+     "side": "攻",
+     "label": "★槍",
+     "hp": 113
+    },
+    {
+     "side": "攻",
+     "label": "★槍",
+     "hp": 103
+    }
+   ],
+   "mutual": false,
+   "killed": true,
+   "minClean": 1
+  }
+ ],
+ "siege2": [
+  {
+   "key": "★★劍 ← 1×★盾",
+   "defDeath": null,
+   "atkDeaths": 1,
+   "placed": 1,
+   "survivors": [
+    {
+     "side": "守",
+     "label": "★★劍",
+     "hp": 285
+    }
+   ],
+   "mutual": false,
+   "killed": false,
+   "minClean": 4
+  },
+  {
+   "key": "★★劍 ← 2×★盾",
+   "defDeath": null,
+   "atkDeaths": 2,
+   "placed": 2,
+   "survivors": [
+    {
+     "side": "守",
+     "label": "★★劍",
+     "hp": 110
+    }
+   ],
+   "mutual": false,
+   "killed": false,
+   "minClean": 4
+  },
+  {
+   "key": "★★劍 ← 3×★盾",
+   "defDeath": 6,
+   "atkDeaths": 1,
+   "placed": 3,
+   "survivors": [
+    {
+     "side": "攻",
+     "label": "★盾",
+     "hp": 96
+    },
+    {
+     "side": "攻",
+     "label": "★盾",
+     "hp": 72
+    }
+   ],
+   "mutual": false,
+   "killed": true,
+   "minClean": 4
+  },
+  {
+   "key": "★★槍 ← 1×★劍",
+   "defDeath": null,
+   "atkDeaths": 1,
+   "placed": 1,
+   "survivors": [
+    {
+     "side": "守",
+     "label": "★★槍",
+     "hp": 225
+    }
+   ],
+   "mutual": false,
+   "killed": false,
+   "minClean": 3
+  },
+  {
+   "key": "★★槍 ← 2×★劍",
+   "defDeath": 5,
+   "atkDeaths": 2,
+   "placed": 2,
+   "survivors": [],
+   "mutual": true,
+   "killed": true,
+   "minClean": 3
+  },
+  {
+   "key": "★★槍 ← 3×★劍",
+   "defDeath": 4,
+   "atkDeaths": 0,
+   "placed": 3,
+   "survivors": [
+    {
+     "side": "攻",
+     "label": "★劍",
+     "hp": 16
+    },
+    {
+     "side": "攻",
+     "label": "★劍",
+     "hp": 88
+    },
+    {
+     "side": "攻",
+     "label": "★劍",
+     "hp": 64
+    }
+   ],
+   "mutual": false,
+   "killed": true,
+   "minClean": 3
+  },
+  {
+   "key": "★★盾 ← 1×★槍",
+   "defDeath": null,
+   "atkDeaths": 1,
+   "placed": 1,
+   "survivors": [
+    {
+     "side": "守",
+     "label": "★★盾",
+     "hp": 372
+    }
+   ],
+   "mutual": false,
+   "killed": false,
+   "minClean": 3
+  },
+  {
+   "key": "★★盾 ← 2×★槍",
+   "defDeath": null,
+   "atkDeaths": 2,
+   "placed": 2,
+   "survivors": [
+    {
+     "side": "守",
+     "label": "★★盾",
+     "hp": 120
+    }
+   ],
+   "mutual": false,
+   "killed": false,
+   "minClean": 3
+  },
+  {
+   "key": "★★盾 ← 3×★槍",
+   "defDeath": 6,
+   "atkDeaths": 0,
+   "placed": 3,
+   "survivors": [
+    {
+     "side": "攻",
+     "label": "★槍",
+     "hp": 8
+    },
+    {
+     "side": "攻",
+     "label": "★槍",
+     "hp": 68
+    },
+    {
+     "side": "攻",
+     "label": "★槍",
+     "hp": 48
+    }
+   ],
+   "mutual": false,
+   "killed": true,
+   "minClean": 3
+  }
+ ]
+}

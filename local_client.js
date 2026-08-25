@@ -16,6 +16,7 @@
   let selectedRank = 1;
   let hoverType = null;
   let artilleryMode = false;
+  let moveFrom = null;                 // 手牌用盡時，已選好要移動的棋子座標
   let notice = "";
   let aiThinking = false;
   let resigned = null;                 // 棄賽者的 pid；棄賽只影響本機顯示，不動引擎規則
@@ -26,15 +27,17 @@
   const started = () => Boolean(engine) && engine.board.some(row => row.some(Boolean));
   const humanTurn = () => engine && !finished() && !aiThinking
     && (mode === "pvp" || engine.current === 1);
-  // 權威引擎會正式處理補給耗盡與棋盤已滿；這裡只保留操作前的防呆。
-  const canAct = () => Boolean(engine) && !finished()
-    && engine.players[engine.current - 1].hand.length > 0 && engine.hasEmptyCell();
+  // 手牌用盡時的合法行動由引擎判定（移動一格），這裡只保留操作前的防呆。
+  // 能不能行動一律問引擎：手牌用盡時還可以移動一格，兩者皆無時引擎會自動跳過。
+  const canAct = () => Boolean(engine) && !finished() && engine.canAct(engine.current);
+  const moveMode = () => Boolean(engine) && !finished() && !engine.canDeploy(engine.current)
+    && engine.legalMoves(engine.current).length > 0;
 
   function reset() {
     // 對電腦與本機雙人都使用正式回合順序：固定 P1 → P2 → combat
     engine = new GameEngine({ roomCode: "LOCAL1", ...ALPHA_TURN_ORDER });
     selectedType = null; selectedRank = 1; hoverType = null;
-    artilleryMode = false; notice = ""; aiThinking = false; resigned = null;
+    artilleryMode = false; moveFrom = null; notice = ""; aiThinking = false; resigned = null;
     render();
     scheduleAi();
   }
@@ -215,8 +218,12 @@
   function updateStatusText() {
     const text = finished()
       ? "按「重開」開始新的一局，或切換對戰模式。"
+      : moveMode()
+        ? (moveFrom
+            ? `已選 (${moveFrom[0] + 1},${moveFrom[1] + 1})，點上下左右相鄰的空格移動。`
+            : "手牌已用盡：本回合改為移動——點自己的一顆棋，再點相鄰空格。")
       : !canAct()
-        ? "目前沒有合法部署；遊戲引擎將依補給耗盡或棋盤已滿規則結束本局。"
+        ? "本回合沒有手牌也沒有可移動的棋子，引擎會自動跳過。"
       : artilleryMode ? (artilleryPlan
           ? `炮擊瞄準中：命中敵軍 ${artilleryPlan.enemies}、友軍 ${artilleryPlan.allies}`
             + `｜預計擊殺 ${artilleryPlan.kills}、誤殺友軍 ${artilleryPlan.losses}`
@@ -258,6 +265,18 @@ ${notice}` : text;
   function onCell(r, c) {
     if (!humanTurn()) return;
     if (artilleryMode) { artilleryMode = false; act({ kind: "artillery", r, c }); return; }
+    if (moveMode()) {
+      const unit = engine.board[r][c];
+      if (unit && unit.pid === engine.current) { moveFrom = [r, c]; notice = ""; render(); return; }
+      if (!moveFrom) { notice = "手牌已用盡：請先點自己的一顆棋，再點相鄰空格。"; render(); return; }
+      const [fr, fc] = moveFrom;
+      const result = engine.move(engine.current, { r: fr, c: fc, toR: r, toC: c, turnId: engine.turnId });
+      notice = result.ok ? "" : result.error;
+      if (result.ok) { moveFrom = null; selectedType = null; }
+      render();
+      if (result.ok) scheduleAi();
+      return;
+    }
     if (!selectedType) { notice = "請先選擇手牌"; render(); return; }
     act({ kind: "deploy", r, c, type: selectedType, rank: selectedRank });
   }

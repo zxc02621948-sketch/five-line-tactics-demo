@@ -19,6 +19,7 @@
   let roomCode = null;
   let selfPid = null;
   let rematchState = { self: false, opponent: false };
+  let moveFrom = null;                 // 手牌用盡時，已選好要移動的棋子座標
   let opponentConnected = false;
   let roomStatus = "none";
   let state = null;
@@ -82,7 +83,7 @@
         rematchState = message.rematch || { self: false, opponent: false };
         pendingRequest = false;
         if (!state || state.current !== selfPid || state.turnId !== previousTurnId) {
-          selectedType = null; selectedRank = 1; artilleryMode = false;
+          selectedType = null; selectedRank = 1; artilleryMode = false; moveFrom = null;
         }
       } else if (message.type === "rejected" || message.type === "error") {
         pendingRequest = false;
@@ -104,6 +105,26 @@
     });
   }
 
+  // 手牌用盡且場上還有棋子可以走時，本回合改為移動。
+  // 連線端沒有引擎實例，從 state.board 自行推導（規則參數仍取自 state.movementRules）。
+  function moveMode() {
+    if (!state || state.gameOver || state.own.hand.length > 0) return false;
+    return legalMovesFromState().length > 0;
+  }
+  function legalMovesFromState() {
+    if (!state) return [];
+    const moves = [];
+    for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+      const unit = state.board[r][c];
+      if (!unit || unit.pid !== selfPid) continue;
+      for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nr = r + dr, nc = c + dc;
+        if (nr >= 0 && nc >= 0 && nr < 9 && nc < 9 && !state.board[nr][nc]) moves.push([r, c, nr, nc]);
+      }
+    }
+    return moves;
+  }
+
   function ownTurn() {
     return Boolean(connected && state && !pendingRequest && !state.gameOver && opponentConnected && state.current === selfPid);
   }
@@ -121,6 +142,15 @@
     if (artilleryMode) {
       sendIntent({ kind: "artillery", r, c });
       artilleryMode = false;
+      return;
+    }
+    if (moveMode()) {
+      const unit = state.board[r][c];
+      if (unit && unit.pid === selfPid) { moveFrom = [r, c]; notice = ""; render(); return; }
+      if (!moveFrom) { notice = "手牌已用盡：請先點自己的一顆棋，再點相鄰空格。"; render(); return; }
+      const [fr, fc] = moveFrom;
+      moveFrom = null;
+      sendIntent({ kind: "move", r: fr, c: fc, toR: r, toC: c });
       return;
     }
     if (!selectedType) { notice = "請先選擇自己的手牌"; render(); return; }
@@ -309,6 +339,9 @@
     $("#turnStatus").textContent = state.gameOver
       ? UI.resultLabel(state)
       : !opponentConnected ? "對手已斷線，等待重連"
+      : state.current === selfPid && moveMode()
+        ? (moveFrom ? `已選 (${moveFrom[0] + 1},${moveFrom[1] + 1})，點相鄰空格移動`
+            : "手牌已用盡：本回合改為移動，點自己的一顆棋再點相鄰空格")
       : state.current === selfPid
         ? state.artilleryUsedThisTurn ? "輪到你：炮擊已使用，必須完成部署" : "輪到你：可先炮擊，然後部署"
         : "等待對方完成操作";

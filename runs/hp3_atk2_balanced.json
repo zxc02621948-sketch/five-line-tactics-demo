@@ -1,0 +1,712 @@
+{
+  "seedPairsPerMatchup": 1000,
+  "samplesPerMatchup": 2000,
+  "seedPolicy": "fixed-fnv1a-v1",
+  "comparisonSummary": {
+    "deckSize": 25,
+    "turnOrderMode": "fixed",
+    "experiment": {
+      "disableArtillery": false,
+      "disableRanks": false,
+      "forcedOpening": null
+    },
+    "deckCounts": {
+      "sword": 9,
+      "shield": 9,
+      "spear": 7
+    },
+    "games": 8000,
+    "avgBoardUnits": 9.62,
+    "avgFinalBoardUnits": 15.242,
+    "avgRounds": 11.882,
+    "rank2DeploymentRate": 0.2193,
+    "rank3DeploymentRate": 0.0078,
+    "avgRank2Deployments": 5.151,
+    "avgRank3Deployments": 0.183,
+    "deckZeroGameRate": 0.225,
+    "deckZeroPlayerRate": 0.1266,
+    "fiveCompletionRate": 0.9981,
+    "firstPlayerWinRate": 0.6999,
+    "secondPlayerWinRate": 0.2572,
+    "drawRate": 0.0429,
+    "firstFiveBrokenBySecondRate": 0.1684,
+    "firstFiveOpportunities": 7127,
+    "firstFiveBrokenBySecond": 1200,
+    "secondFiveDirectWinRate": 0.75,
+    "secondFiveOpportunities": 2744,
+    "secondFiveDirectWins": 2058,
+    "secondArtilleryFreshFirstHitRate": 0.4275,
+    "secondArtilleryShots": 641,
+    "secondArtilleryFreshFirstHits": 274,
+    "crossRoundConsecutiveWinRate": 0,
+    "crossRoundWins": 0,
+    "crossRoundThreeToFiveWins": 0,
+    "crossRoundFourToFiveWins": 0,
+    "firstFormation": {
+      "first": {
+        "2": {
+          "averageRound": 2,
+          "formationRate": 1,
+          "samples": 8000
+        },
+        "3": {
+          "averageRound": 3.091,
+          "formationRate": 0.989,
+          "samples": 7912
+        },
+        "4": {
+          "averageRound": 4.263,
+          "formationRate": 0.9503,
+          "samples": 7602
+        },
+        "fiveThreat": {
+          "averageRound": 4.274,
+          "formationRate": 0.9521,
+          "samples": 7617
+        }
+      },
+      "second": {
+        "2": {
+          "averageRound": 2,
+          "formationRate": 1,
+          "samples": 8000
+        },
+        "3": {
+          "averageRound": 7.7,
+          "formationRate": 0.7588,
+          "samples": 6070
+        },
+        "4": {
+          "averageRound": 10.827,
+          "formationRate": 0.3949,
+          "samples": 3159
+        },
+        "fiveThreat": {
+          "averageRound": 10.563,
+          "formationRate": 0.4258,
+          "samples": 3406
+        }
+      }
+    },
+    "regionRace": {
+      "center3": {
+        "firstClaimRateAllGames": 1,
+        "secondClaimRateAllGames": 0,
+        "firstShareWhenClaimed": 1,
+        "claimedGames": 8000
+      },
+      "center": {
+        "firstClaimRateAllGames": 1,
+        "secondClaimRateAllGames": 0,
+        "firstShareWhenClaimed": 1,
+        "claimedGames": 8000
+      },
+      "keyCross": {
+        "firstClaimRateAllGames": 0.282,
+        "secondClaimRateAllGames": 0.6169,
+        "firstShareWhenClaimed": 0.3137,
+        "claimedGames": 7191
+      }
+    },
+    "averageNormalBlocks": {
+      "first": 0.523,
+      "second": 2.596
+    },
+    "firstWinFeatures": {
+      "pureFiveSpeed": {
+        "count": 293,
+        "rate": 0.0523
+      },
+      "combatKillAdvantage": {
+        "count": 3899,
+        "rate": 0.6964
+      },
+      "artilleryImpact": {
+        "count": 946,
+        "rate": 0.169
+      },
+      "highRankFinalFive": {
+        "count": 4273,
+        "rate": 0.7632
+      },
+      "keyCellFinalFive": {
+        "count": 3295,
+        "rate": 0.5885
+      }
+    },
+    "openingCells": {
+      "4,4": {
+        "games": 8000,
+        "wins": 5599,
+        "firstWinRate": 0.6999
+      }
+    }
+  },
+  "matrix": {
+    "ranker": {
+      "ranker": {
+        "p1": 0.473,
+        "p2": 0.487,
+        "draw": 0.04,
+        "parityWins": {
+          "oddP1": 473,
+          "oddP2": 481,
+          "evenP1": 474,
+          "evenP2": 493
+        },
+        "rounds": 12,
+        "deaths": 8,
+        "rank2": 8.4,
+        "rank3": 0.36,
+        "finalBoardUnits": 15.53,
+        "deckZeroGameRate": 0.396,
+        "fiveCompletionRate": 0.993,
+        "rank2ByType": {
+          "sword": 3.45,
+          "shield": 2.81,
+          "spear": 2.14
+        },
+        "typeMix": {
+          "p1": {
+            "sword": 0.313,
+            "shield": 0.411,
+            "spear": 0.276
+          },
+          "p2": {
+            "sword": 0.301,
+            "shield": 0.427,
+            "spear": 0.272
+          }
+        },
+        "byStartingPlayer": {
+          "1": {
+            "games": 1000,
+            "p1": 0.77,
+            "p2": 0.19,
+            "draw": 0.04
+          },
+          "2": {
+            "games": 1000,
+            "p1": 0.177,
+            "p2": 0.784,
+            "draw": 0.039
+          }
+        },
+        "rank2Economy": {
+          "p1": {
+            "rank2PerGame": 4.227,
+            "firstRank2GameRate": 0.989,
+            "avgFirstRank2Round": 2.38,
+            "secondRank2GameRate": 0.945,
+            "avgSecondRank2Round": 4.47,
+            "avgUsableCardsLeftAfterCraft": 3.65,
+            "avgLaterDeploysOfCraftedType": 1.39,
+            "exhaustedTurnsPerGame": 1.688,
+            "rank2Deaths": 1123,
+            "rank2DeathRate": 0.133,
+            "avgSurvivalRoundsOfDead": 8.07,
+            "killedByCounterRate": 0.44,
+            "avgCounterDamageShare": 0.444
+          },
+          "p2": {
+            "rank2PerGame": 4.168,
+            "firstRank2GameRate": 0.992,
+            "avgFirstRank2Round": 2.48,
+            "secondRank2GameRate": 0.944,
+            "avgSecondRank2Round": 4.54,
+            "avgUsableCardsLeftAfterCraft": 3.62,
+            "avgLaterDeploysOfCraftedType": 1.38,
+            "exhaustedTurnsPerGame": 1.696,
+            "rank2Deaths": 1113,
+            "rank2DeathRate": 0.134,
+            "avgSurvivalRoundsOfDead": 8.22,
+            "killedByCounterRate": 0.397,
+            "avgCounterDamageShare": 0.422
+          }
+        },
+        "artillery": [
+          0,
+          0
+        ],
+        "artilleryGameRate": [
+          0,
+          0
+        ],
+        "artilleryTurnRate": [
+          0,
+          0
+        ],
+        "artilleryKills": 0,
+        "artilleryEventStats": {
+          "shots": 0,
+          "preventedFourPerGame": 0,
+          "preventedFivePerGame": 0,
+          "directKillShotRate": 0,
+          "createdSpaceShotRate": 0,
+          "hitTwoEnemyShotRate": 0,
+          "friendlyHitShotRate": 0
+        },
+        "rank2Metrics": {
+          "sword": {
+            "deployments": 6903,
+            "trackedUnits": 6903,
+            "deploymentsPerGame": 3.451,
+            "avgSurvivalRounds": 6.96,
+            "avgDamageTaken": 133,
+            "avgDamageDealt": 200.36,
+            "finalFiveParticipationRate": 0.236,
+            "finalFiveParticipants": 1631
+          },
+          "shield": {
+            "deployments": 5614,
+            "trackedUnits": 5614,
+            "deploymentsPerGame": 2.807,
+            "avgSurvivalRounds": 7.62,
+            "avgDamageTaken": 169.41,
+            "avgDamageDealt": 157.86,
+            "finalFiveParticipationRate": 0.229,
+            "finalFiveParticipants": 1284
+          },
+          "spear": {
+            "deployments": 4273,
+            "trackedUnits": 4273,
+            "deploymentsPerGame": 2.136,
+            "avgSurvivalRounds": 6.47,
+            "avgDamageTaken": 130.36,
+            "avgDamageDealt": 174.36,
+            "finalFiveParticipationRate": 0.239,
+            "finalFiveParticipants": 1021
+          }
+        },
+        "types": {
+          "sword": 7.2,
+          "shield": 9.9,
+          "spear": 6.4
+        }
+      },
+      "balanced": {
+        "p1": 0.74,
+        "p2": 0.227,
+        "draw": 0.034,
+        "parityWins": {
+          "oddP1": 734,
+          "oddP2": 220,
+          "evenP1": 745,
+          "evenP2": 233
+        },
+        "rounds": 11.8,
+        "deaths": 8.2,
+        "rank2": 5,
+        "rank3": 0.19,
+        "finalBoardUnits": 15.02,
+        "deckZeroGameRate": 0.256,
+        "fiveCompletionRate": 1,
+        "rank2ByType": {
+          "sword": 2.15,
+          "shield": 1.7,
+          "spear": 1.18
+        },
+        "typeMix": {
+          "p1": {
+            "sword": 0.314,
+            "shield": 0.429,
+            "spear": 0.258
+          },
+          "p2": {
+            "sword": 0.311,
+            "shield": 0.407,
+            "spear": 0.283
+          }
+        },
+        "byStartingPlayer": {
+          "1": {
+            "games": 1000,
+            "p1": 0.923,
+            "p2": 0.052,
+            "draw": 0.025
+          },
+          "2": {
+            "games": 1000,
+            "p1": 0.556,
+            "p2": 0.401,
+            "draw": 0.043
+          }
+        },
+        "rank2Economy": {
+          "p1": {
+            "rank2PerGame": 3.978,
+            "firstRank2GameRate": 0.991,
+            "avgFirstRank2Round": 2.42,
+            "secondRank2GameRate": 0.942,
+            "avgSecondRank2Round": 4.47,
+            "avgUsableCardsLeftAfterCraft": 3.72,
+            "avgLaterDeploysOfCraftedType": 1.41,
+            "exhaustedTurnsPerGame": 1.966,
+            "rank2Deaths": 255,
+            "rank2DeathRate": 0.032,
+            "avgSurvivalRoundsOfDead": 11.44,
+            "killedByCounterRate": 0.478,
+            "avgCounterDamageShare": 0.488
+          },
+          "p2": {
+            "rank2PerGame": 1.052,
+            "firstRank2GameRate": 0.641,
+            "avgFirstRank2Round": 5.03,
+            "secondRank2GameRate": 0.281,
+            "avgSecondRank2Round": 7.84,
+            "avgUsableCardsLeftAfterCraft": 4.34,
+            "avgLaterDeploysOfCraftedType": 1.54,
+            "exhaustedTurnsPerGame": 0.033,
+            "rank2Deaths": 330,
+            "rank2DeathRate": 0.157,
+            "avgSurvivalRoundsOfDead": 7.53,
+            "killedByCounterRate": 0.436,
+            "avgCounterDamageShare": 0.447
+          }
+        },
+        "artillery": [
+          0,
+          0.17
+        ],
+        "artilleryGameRate": [
+          0,
+          0.158
+        ],
+        "artilleryTurnRate": [
+          0,
+          0.014
+        ],
+        "artilleryKills": 0.36,
+        "artilleryEventStats": {
+          "shots": 338,
+          "preventedFourPerGame": 0.034,
+          "preventedFivePerGame": 0.002,
+          "directKillShotRate": 1,
+          "createdSpaceShotRate": 1,
+          "hitTwoEnemyShotRate": 1,
+          "friendlyHitShotRate": 0.923
+        },
+        "rank2Metrics": {
+          "sword": {
+            "deployments": 4308,
+            "trackedUnits": 4308,
+            "deploymentsPerGame": 2.154,
+            "avgSurvivalRounds": 7.15,
+            "avgDamageTaken": 97.68,
+            "avgDamageDealt": 183.08,
+            "finalFiveParticipationRate": 0.319,
+            "finalFiveParticipants": 1374
+          },
+          "shield": {
+            "deployments": 3395,
+            "trackedUnits": 3395,
+            "deploymentsPerGame": 1.698,
+            "avgSurvivalRounds": 7.88,
+            "avgDamageTaken": 121.32,
+            "avgDamageDealt": 138.8,
+            "finalFiveParticipationRate": 0.277,
+            "finalFiveParticipants": 941
+          },
+          "spear": {
+            "deployments": 2358,
+            "trackedUnits": 2358,
+            "deploymentsPerGame": 1.179,
+            "avgSurvivalRounds": 6.61,
+            "avgDamageTaken": 94.91,
+            "avgDamageDealt": 157.5,
+            "finalFiveParticipationRate": 0.33,
+            "finalFiveParticipants": 778
+          }
+        },
+        "types": {
+          "sword": 7.3,
+          "shield": 9.7,
+          "spear": 6.3
+        }
+      }
+    },
+    "balanced": {
+      "ranker": {
+        "p1": 0.239,
+        "p2": 0.726,
+        "draw": 0.035,
+        "parityWins": {
+          "oddP1": 213,
+          "oddP2": 672,
+          "evenP1": 266,
+          "evenP2": 779
+        },
+        "rounds": 11.9,
+        "deaths": 8.3,
+        "rank2": 5.1,
+        "rank3": 0.17,
+        "finalBoardUnits": 15.1,
+        "deckZeroGameRate": 0.241,
+        "fiveCompletionRate": 1,
+        "rank2ByType": {
+          "sword": 2.15,
+          "shield": 1.69,
+          "spear": 1.21
+        },
+        "typeMix": {
+          "p1": {
+            "sword": 0.324,
+            "shield": 0.396,
+            "spear": 0.28
+          },
+          "p2": {
+            "sword": 0.307,
+            "shield": 0.436,
+            "spear": 0.257
+          }
+        },
+        "byStartingPlayer": {
+          "1": {
+            "games": 1000,
+            "p1": 0.416,
+            "p2": 0.535,
+            "draw": 0.049
+          },
+          "2": {
+            "games": 1000,
+            "p1": 0.063,
+            "p2": 0.916,
+            "draw": 0.021
+          }
+        },
+        "rank2Economy": {
+          "p1": {
+            "rank2PerGame": 1.091,
+            "firstRank2GameRate": 0.657,
+            "avgFirstRank2Round": 4.97,
+            "secondRank2GameRate": 0.285,
+            "avgSecondRank2Round": 7.78,
+            "avgUsableCardsLeftAfterCraft": 4.34,
+            "avgLaterDeploysOfCraftedType": 1.66,
+            "exhaustedTurnsPerGame": 0.03,
+            "rank2Deaths": 366,
+            "rank2DeathRate": 0.168,
+            "avgSurvivalRoundsOfDead": 7.78,
+            "killedByCounterRate": 0.44,
+            "avgCounterDamageShare": 0.454
+          },
+          "p2": {
+            "rank2PerGame": 3.965,
+            "firstRank2GameRate": 0.988,
+            "avgFirstRank2Round": 2.47,
+            "secondRank2GameRate": 0.939,
+            "avgSecondRank2Round": 4.61,
+            "avgUsableCardsLeftAfterCraft": 3.69,
+            "avgLaterDeploysOfCraftedType": 1.39,
+            "exhaustedTurnsPerGame": 2.287,
+            "rank2Deaths": 336,
+            "rank2DeathRate": 0.042,
+            "avgSurvivalRoundsOfDead": 12.78,
+            "killedByCounterRate": 0.467,
+            "avgCounterDamageShare": 0.482
+          }
+        },
+        "artillery": [
+          0.17,
+          0
+        ],
+        "artilleryGameRate": [
+          0.155,
+          0
+        ],
+        "artilleryTurnRate": [
+          0.014,
+          0
+        ],
+        "artilleryKills": 0.36,
+        "artilleryEventStats": {
+          "shots": 341,
+          "preventedFourPerGame": 0.03,
+          "preventedFivePerGame": 0.001,
+          "directKillShotRate": 1,
+          "createdSpaceShotRate": 1,
+          "hitTwoEnemyShotRate": 1,
+          "friendlyHitShotRate": 0.909
+        },
+        "rank2Metrics": {
+          "sword": {
+            "deployments": 4309,
+            "trackedUnits": 4309,
+            "deploymentsPerGame": 2.155,
+            "avgSurvivalRounds": 7.2,
+            "avgDamageTaken": 97.73,
+            "avgDamageDealt": 177.21,
+            "finalFiveParticipationRate": 0.315,
+            "finalFiveParticipants": 1356
+          },
+          "shield": {
+            "deployments": 3378,
+            "trackedUnits": 3378,
+            "deploymentsPerGame": 1.689,
+            "avgSurvivalRounds": 7.94,
+            "avgDamageTaken": 130.46,
+            "avgDamageDealt": 149.62,
+            "finalFiveParticipationRate": 0.292,
+            "finalFiveParticipants": 986
+          },
+          "spear": {
+            "deployments": 2425,
+            "trackedUnits": 2425,
+            "deploymentsPerGame": 1.212,
+            "avgSurvivalRounds": 7.08,
+            "avgDamageTaken": 100.35,
+            "avgDamageDealt": 164.38,
+            "finalFiveParticipationRate": 0.322,
+            "finalFiveParticipants": 780
+          }
+        },
+        "types": {
+          "sword": 7.4,
+          "shield": 9.7,
+          "spear": 6.3
+        }
+      },
+      "balanced": {
+        "p1": 0.471,
+        "p2": 0.466,
+        "draw": 0.063,
+        "parityWins": {
+          "oddP1": 438,
+          "oddP2": 424,
+          "evenP1": 504,
+          "evenP2": 508
+        },
+        "rounds": 11.9,
+        "deaths": 8.4,
+        "rank2": 2.1,
+        "rank3": 0.02,
+        "finalBoardUnits": 15.33,
+        "deckZeroGameRate": 0.007,
+        "fiveCompletionRate": 1,
+        "rank2ByType": {
+          "sword": 1,
+          "shield": 0.69,
+          "spear": 0.43
+        },
+        "typeMix": {
+          "p1": {
+            "sword": 0.326,
+            "shield": 0.411,
+            "spear": 0.262
+          },
+          "p2": {
+            "sword": 0.314,
+            "shield": 0.418,
+            "spear": 0.268
+          }
+        },
+        "byStartingPlayer": {
+          "1": {
+            "games": 1000,
+            "p1": 0.694,
+            "p2": 0.237,
+            "draw": 0.069
+          },
+          "2": {
+            "games": 1000,
+            "p1": 0.248,
+            "p2": 0.695,
+            "draw": 0.057
+          }
+        },
+        "rank2Economy": {
+          "p1": {
+            "rank2PerGame": 1.075,
+            "firstRank2GameRate": 0.666,
+            "avgFirstRank2Round": 4.9,
+            "secondRank2GameRate": 0.294,
+            "avgSecondRank2Round": 7.69,
+            "avgUsableCardsLeftAfterCraft": 4.29,
+            "avgLaterDeploysOfCraftedType": 1.55,
+            "exhaustedTurnsPerGame": 0.027,
+            "rank2Deaths": 89,
+            "rank2DeathRate": 0.041,
+            "avgSurvivalRoundsOfDead": 7.9,
+            "killedByCounterRate": 0.449,
+            "avgCounterDamageShare": 0.488
+          },
+          "p2": {
+            "rank2PerGame": 1.046,
+            "firstRank2GameRate": 0.653,
+            "avgFirstRank2Round": 5.04,
+            "secondRank2GameRate": 0.282,
+            "avgSecondRank2Round": 7.68,
+            "avgUsableCardsLeftAfterCraft": 4.27,
+            "avgLaterDeploysOfCraftedType": 1.51,
+            "exhaustedTurnsPerGame": 0.021,
+            "rank2Deaths": 95,
+            "rank2DeathRate": 0.045,
+            "avgSurvivalRoundsOfDead": 8.2,
+            "killedByCounterRate": 0.516,
+            "avgCounterDamageShare": 0.502
+          }
+        },
+        "artillery": [
+          0.37,
+          0.36
+        ],
+        "artilleryGameRate": [
+          0.328,
+          0.325
+        ],
+        "artilleryTurnRate": [
+          0.031,
+          0.03
+        ],
+        "artilleryKills": 1.51,
+        "artilleryEventStats": {
+          "shots": 1448,
+          "preventedFourPerGame": 0.1,
+          "preventedFivePerGame": 0.005,
+          "directKillShotRate": 1,
+          "createdSpaceShotRate": 1,
+          "hitTwoEnemyShotRate": 1,
+          "friendlyHitShotRate": 0.898
+        },
+        "rank2Metrics": {
+          "sword": {
+            "deployments": 1999,
+            "trackedUnits": 1999,
+            "deploymentsPerGame": 1,
+            "avgSurvivalRounds": 6.67,
+            "avgDamageTaken": 89.05,
+            "avgDamageDealt": 167.78,
+            "finalFiveParticipationRate": 0.295,
+            "finalFiveParticipants": 590
+          },
+          "shield": {
+            "deployments": 1390,
+            "trackedUnits": 1390,
+            "deploymentsPerGame": 0.695,
+            "avgSurvivalRounds": 7.68,
+            "avgDamageTaken": 121.94,
+            "avgDamageDealt": 146.9,
+            "finalFiveParticipationRate": 0.294,
+            "finalFiveParticipants": 408
+          },
+          "spear": {
+            "deployments": 852,
+            "trackedUnits": 852,
+            "deploymentsPerGame": 0.426,
+            "avgSurvivalRounds": 6.27,
+            "avgDamageTaken": 96.6,
+            "avgDamageDealt": 162.1,
+            "finalFiveParticipationRate": 0.264,
+            "finalFiveParticipants": 225
+          }
+        },
+        "types": {
+          "sword": 7.6,
+          "shield": 9.8,
+          "spear": 6.3
+        }
+      }
+    }
+  },
+  "causalArtillery": null
+}

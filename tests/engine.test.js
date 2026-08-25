@@ -162,65 +162,101 @@ test("death dismantles an elite's three bound cards into cooldown", () => {
   assert.equal(engine.cardDistribution(1).total, 25);
 });
 
-test("the responding player loses when turn-start draw still leaves no deployable card", () => {
-  const engine = game();
-  engine.players[0].hand = ["sword"];
+test("手牌用盡時改為移動一格，不判輸", () => {
+  const engine = new GameEngine({ roomCode: "MOVE", turnOrderMode: "fixed", startingPlayer: 1,
+    randomInt: () => 0 });
+  engine.board = Array.from({ length: 9 }, () => Array(9).fill(null));
+  let nextId = 1;
+  const put = (r, c, pid) => {
+    const stats = baseStats("shield", 1);
+    engine.board[r][c] = { id: nextId++, pid, type: "shield", rank: 1, cards: 1,
+      hp: stats.maxHp, maxHp: stats.maxHp, atk: stats.atk };
+    return engine.board[r][c];
+  };
+  const unit = put(4, 4, 1);
+  put(0, 0, 2);
+  engine.players[0].hand = ["shield"];
+
+  // 還有手牌時不能改用移動——移動是替代行動，不是額外行動
+  assert.equal(engine.canDeploy(1), true);
+  assert.deepEqual(engine.legalMoves(1), []);
+  assert.match(engine.move(1, { r: 4, c: 4, toR: 4, toC: 5, turnId: engine.turnId }).error, /不能改用移動/);
+
+  // 手牌用盡後才解鎖
+  engine.players[0].hand = [];
   engine.players[0].deck = [];
-  engine.players[0].cooldown = [];
+  assert.equal(engine.canDeploy(1), false);
+  assert.equal(engine.legalMoves(1).length, 4, "中央的棋子有四個正交方向");
+  assert.equal(engine.canAct(1), true, "有得移動就還有行動，不該判輸");
+
+  // 手動擺盤的卡片總數本來就不是 25，所以比對「移動前後有沒有變動」才有意義
+  const before = engine.cardDistribution(1);
+  const moved = engine.move(1, { r: 4, c: 4, toR: 4, toC: 5, turnId: engine.turnId });
+  assert.equal(moved.ok, true);
+  assert.equal(engine.board[4][5], unit);
+  assert.equal(engine.board[4][4], null);
+  assert.equal(engine.gameOver, false, "沒牌不判輸");
+  const after = engine.cardDistribution(1);
+  assert.deepEqual(after, before, "移動只換位置，不動任何一張牌");
+});
+
+test("移動只能往正交相鄰的空格走一格，而且只能動自己的棋", () => {
+  const fresh = () => {
+    const engine = new GameEngine({ roomCode: "MOVE2", turnOrderMode: "fixed", startingPlayer: 1,
+      randomInt: () => 0 });
+    engine.board = Array.from({ length: 9 }, () => Array(9).fill(null));
+    let nextId = 1;
+    const put = (r, c, pid) => {
+      const stats = baseStats("shield", 1);
+      engine.board[r][c] = { id: nextId++, pid, type: "shield", rank: 1, cards: 1,
+        hp: stats.maxHp, maxHp: stats.maxHp, atk: stats.atk };
+    };
+    put(4, 4, 1); put(0, 0, 2); put(4, 3, 1);
+    engine.players[0].hand = []; engine.players[0].deck = [];
+    return engine;
+  };
+  const cases = [
+    [{ r: 4, c: 4, toR: 5, toC: 5 }, /一格/, "斜走"],
+    [{ r: 4, c: 4, toR: 4, toC: 6 }, /一格/, "走兩格"],
+    [{ r: 0, c: 0, toR: 0, toC: 1 }, /自己的單位/, "移動敵方"],
+    [{ r: 4, c: 4, toR: 4, toC: 3 }, /已有單位/, "目標格有人"],
+    [{ r: 1, c: 1, toR: 1, toC: 2 }, /起點沒有單位/, "起點是空的"],
+  ];
+  for (const [intent, pattern, label] of cases) {
+    const engine = fresh();
+    const result = engine.move(1, { ...intent, turnId: engine.turnId });
+    assert.equal(result.ok, false, `${label} 不該成功`);
+    assert.match(result.error, pattern, label);
+  }
+});
+
+test("沒牌又沒有合法移動時自動跳過該回合，而不是判輸", () => {
+  const engine = new GameEngine({ roomCode: "SKIP", turnOrderMode: "fixed", startingPlayer: 1,
+    randomInt: () => 0 });
+  engine.board = Array.from({ length: 9 }, () => Array(9).fill(null));
+  // P2 完全沒有棋子、沒有手牌、冷卻還要等 3 輪才回得來
+  engine.players[0].hand = ["shield"];
+  engine.players[0].deck = ["shield", "shield"];
   engine.players[1].hand = [];
   engine.players[1].deck = [];
-  engine.players[1].cooldown = [];
+  engine.players[1].cooldown = [{ type: "shield", turns: 3 }];
+  assert.equal(engine.canAct(2), false);
 
-  const result = engine.deploy(1, intent(engine, { r: 0, c: 0, type: "sword", rank: 1 }));
-  assert.equal(result.ok, true);
-  assert.equal(engine.gameOver, true);
-  assert.equal(engine.winner, 1);
-  assert.equal(engine.endReason, "opponent_supply_exhausted");
-  assert.equal(engine.visibleStateFor(1).endReason, "opponent_supply_exhausted");
+  assert.equal(engine.deploy(1, { r: 4, c: 4, type: "shield", rank: 1, turnId: engine.turnId }).ok, true);
+  assert.equal(engine.gameOver, false, "無法行動的一方不判輸");
+  assert.equal(engine.winner, null);
+  assert.ok(engine.logs.some(entry => /跳過本回合/.test(entry.text)), "要留下跳過紀錄");
+  assert.equal(engine.roundNo, 2, "P2 被跳過後回合正常推進");
 });
 
-test("between rounds, one exhausted supply loses and simultaneous exhaustion draws", () => {
-  const oneEmpty = game();
-  oneEmpty.players[0].hand = ["sword"];
-  oneEmpty.players[0].deck = [];
-  oneEmpty.players[0].cooldown = [];
-  oneEmpty.players[1].hand = ["shield", "shield"];
-  oneEmpty.players[1].deck = [];
-  oneEmpty.players[1].cooldown = [];
-  oneEmpty.deploy(1, intent(oneEmpty, { r: 0, c: 0, type: "sword", rank: 1 }));
-  oneEmpty.deploy(2, intent(oneEmpty, { r: 8, c: 8, type: "shield", rank: 1 }));
-  assert.equal(oneEmpty.winner, 2);
-  assert.equal(oneEmpty.endReason, "opponent_supply_exhausted");
-
-  const bothEmpty = game();
-  bothEmpty.players[0].hand = ["sword"];
-  bothEmpty.players[0].deck = [];
-  bothEmpty.players[0].cooldown = [];
-  bothEmpty.players[1].hand = ["shield"];
-  bothEmpty.players[1].deck = [];
-  bothEmpty.players[1].cooldown = [];
-  bothEmpty.deploy(1, intent(bothEmpty, { r: 0, c: 0, type: "sword", rank: 1 }));
-  bothEmpty.deploy(2, intent(bothEmpty, { r: 8, c: 8, type: "shield", rank: 1 }));
-  assert.equal(bothEmpty.winner, "draw");
-  assert.equal(bothEmpty.endReason, "supply_exhausted_both");
-  assert.equal(bothEmpty.fullMatchReport().endReason, "supply_exhausted_both");
-});
-
-test("a full board ends as a draw instead of leaving a non-terminal turn", () => {
-  const engine = game();
-  const stats = baseStats("shield", 1);
-  let id = 1;
-  engine.board = Array.from({ length: 9 }, (_, r) => Array.from({ length: 9 }, (_, c) => ({
-    id: id++, pid: (r + c) % 2 + 1, type: "shield", rank: 1, cards: 1,
-    hp: stats.maxHp, maxHp: stats.maxHp, atk: stats.atk,
-  })));
-  const result = engine.concludeNoDeployment({ betweenRounds: true, roundResolved: true });
-  assert.equal(result.gameOver, true);
-  assert.equal(engine.winner, "draw");
-  assert.equal(engine.endReason, "board_full");
-  assert.deepEqual(GameEngine.terminalRules(), {
-    boardFull: "draw",
-    bothSupplyExhausted: "draw",
-    oneSupplyExhausted: "opponent_wins",
-  });
+test("移動規則的參數只有一份，且標明是沒牌時的替代行動", () => {
+  const rules = GameEngine.movementRules();
+  assert.deepEqual(rules, { range: 1, orthogonalOnly: true, onlyWhenCannotDeploy: true,
+    skipWhenNoLegalMove: true });
+  const state = new GameEngine({ roomCode: "MR", turnOrderMode: "fixed", startingPlayer: 1,
+    randomInt: () => 0 }).visibleStateFor(1);
+  assert.deepEqual(state.movementRules, rules);
+  // 舊的斷糧判輸規則必須整組移除
+  assert.equal(typeof GameEngine.terminalRules, "undefined");
+  assert.equal(typeof GameEngine.prototype.concludeNoDeployment, "undefined");
 });
