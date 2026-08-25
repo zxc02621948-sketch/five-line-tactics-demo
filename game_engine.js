@@ -34,6 +34,13 @@ const DECK_TEMPLATE = Object.freeze([
   ...Array(9).fill("shield"),
   ...Array(7).fill("spear"),
 ]);
+// 消極對局：雙方連續 N 輪零交戰＝棄賽，雙敗。「兩邊都不打」才算，
+// 單方閃避不算——那本來就會因為沒擋線而輸得更快。
+const PASSIVITY_FORFEIT_ROUNDS = 3;
+// 加賽：同輪雙方五連不判平手，改為進入加賽，只有單方五連才判勝。
+// 緩衝輪數過後每輪全盤扣 maxHP 的固定比例。基準必須是 maxHp——
+// 用當前 HP 是指數衰減，永遠殺不死單位，加賽不會結束。
+const OVERTIME_RULES = Object.freeze({ graceRounds: 3, decayRate: 0.10, decayBasis: "maxHp" });
 const ORTHOGONAL = Object.freeze([[1, 0], [-1, 0], [0, 1], [0, -1]]);
 const FIVE_DIRECTIONS = Object.freeze([[1, 0], [0, 1], [1, 1], [1, -1]]);
 
@@ -91,6 +98,9 @@ class GameEngine {
     this.deploymentCommitted = false;
     this.gameOver = false;
     this.winner = null;
+    this.overtime = false;
+    this.overtimeStartRound = null;
+    this.quietRounds = 0;
     this.nextUnitId = 1;
     this.combatResolutionCount = 0;
     this.logs = [];
@@ -547,8 +557,24 @@ class GameEngine {
         this.players[unit.pid - 1].cooldown.push({ type: unit.type, turns: 3 });
       }
       this.board[r][c] = null;
-      this.addLog("kill", `${cause === "artillery" ? "炮擊" : "戰鬥"}擊破 P${unit.pid} ${"★".repeat(unit.rank)}${TYPES[unit.type].name}`, death);
+      const causeLabel = cause === "artillery" ? "炮擊" : cause === "overtime" ? "加賽衰減" : "戰鬥";
+      this.addLog("kill", `${causeLabel}擊破 P${unit.pid} ${"★".repeat(unit.rank)}${TYPES[unit.type].name}`, death);
     }
+  }
+
+  // 加賽衰減：全盤等比例扣血，敵我一視同仁。回傳這輪的扣血明細。
+  applyOvertimeDecay() {
+    const hits = [];
+    const deaths = [];
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+      const unit = this.board[r][c];
+      if (!unit) continue;
+      const damage = Math.max(1, Math.round(unit.maxHp * OVERTIME_RULES.decayRate));
+      unit.hp -= damage;
+      hits.push({ r, c, unitId: unit.id, pid: unit.pid, damage, hpAfter: unit.hp });
+    }
+    if (hits.length) this.removeDead("overtime", deaths);
+    return { hits, deaths };
   }
 
   threatWindows(pid) {
@@ -612,16 +638,51 @@ class GameEngine {
     }
 
     const combat = this.resolveCombat();
-    this.ensureRoundRecord().combat = combat;
+    const record = this.ensureRoundRecord();
+    record.combat = combat;
+
+    // 消極對局：雙方連續零交戰達門檻＝棄賽，雙敗。先於五連判定，
+    // 因為「雙方都沒在打」時這局已經不成立，不該讓任何一方兌現。
+    this.quietRounds = combat.packets.length ? 0 : this.quietRounds + 1;
+    record.quietRounds = this.quietRounds;
+    if (this.quietRounds >= PASSIVITY_FORFEIT_ROUNDS) {
+      this.gameOver = true;
+      this.winner = "double_loss";
+      this.endedAt = new Date().toISOString();
+      this.finalFive = { p1: [], p2: [] };
+      this.addLog("winner", `雙方連續 ${PASSIVITY_FORFEIT_ROUNDS} 輪未交戰：消極對局，雙方棄賽。`,
+        { quietRounds: this.quietRounds });
+      return { roundResolved: true, gameOver: true, winner: this.winner };
+    }
+
+    // 加賽衰減在五連判定之前結算：被衰減打斷的線就不算數。
+    if (this.overtime && this.roundNo - this.overtimeStartRound > OVERTIME_RULES.graceRounds) {
+      record.overtimeDecay = this.applyOvertimeDecay();
+    }
+
     const p1Lines = this.fiveLines(1);
     const p2Lines = this.fiveLines(2);
-    if (p1Lines.length || p2Lines.length) {
+    const p1Has = p1Lines.length > 0;
+    const p2Has = p2Lines.length > 0;
+
+    if (p1Has !== p2Has) {
+      // 恰好單方五連才判勝——加賽階段內外都適用同一條判定。
       this.gameOver = true;
-      this.winner = p1Lines.length && p2Lines.length ? "draw" : p1Lines.length ? 1 : 2;
+      this.winner = p1Has ? 1 : 2;
       this.endedAt = new Date().toISOString();
       this.finalFive = { p1: p1Lines, p2: p2Lines };
-      this.addLog("winner", this.winner === "draw" ? "雙方同時五連：平手" : `P${this.winner} 五連獲勝！`, this.finalFive);
+      this.addLog("winner", `P${this.winner} 五連獲勝！${this.overtime ? "（加賽）" : ""}`, this.finalFive);
       return { roundResolved: true, gameOver: true, winner: this.winner };
+    }
+
+    if (p1Has && p2Has && !this.overtime) {
+      // 同輪雙方五連不判平手，改為進入加賽。
+      this.overtime = true;
+      this.overtimeStartRound = this.roundNo;
+      this.addLog("sys",
+        `雙方同輪五連：進入加賽。只有單方五連才判勝；再 ${OVERTIME_RULES.graceRounds} 輪後，`
+        + `每輪全盤扣最大生命的 ${Math.round(OVERTIME_RULES.decayRate * 100)}%。`,
+        { overtimeStartRound: this.roundNo });
     }
 
     this.roundNo++;
@@ -650,6 +711,11 @@ class GameEngine {
       };
     }
     return catalog;
+  }
+
+  // 純顯示用：加賽與消極判負的實際參數，讓 UI 不必自己抄一份數值。
+  static overtimeRules() {
+    return { ...OVERTIME_RULES, passivityForfeitRounds: PASSIVITY_FORFEIT_ROUNDS };
   }
 
   // 純顯示用：炮擊的實際參數，讓 UI 不必自己抄一份數值。
@@ -695,6 +761,11 @@ class GameEngine {
       deploymentCommitted: this.deploymentCommitted,
       gameOver: this.gameOver,
       winner: this.winner,
+      overtime: this.overtime,
+      overtimeRound: this.overtime ? this.roundNo - this.overtimeStartRound : 0,
+      overtimeRules: GameEngine.overtimeRules(),
+      quietRounds: this.quietRounds,
+      passivityForfeitRounds: PASSIVITY_FORFEIT_ROUNDS,
       logs: this.logs.map(({ index, round, kind, text }) => ({ index, round, kind, text })),
       finalFive: this.gameOver ? this.finalFive : null,
     };
@@ -721,6 +792,13 @@ class GameEngine {
         artilleryDamage: { center: 30, outer: 12, friendlyFire: true },
         rank2: { cards: 3, hpMultiplier: 1.5, attackMultiplier: 1, maxOnBoardPerType: 1 },
         rank3: "disabled",
+        overtime: {
+          trigger: "同輪雙方五連",
+          win: "只有單方五連才判勝",
+          deployDuringOvertime: true,
+          ...OVERTIME_RULES,
+        },
+        passivityForfeit: { quietRounds: PASSIVITY_FORFEIT_ROUNDS, result: "double_loss" },
         eliteAbilities: {
           sword: "斬入：親自擊殺目標後強制移入死亡格，對相鄰最低HP敵人追擊 100% base ATK（套互剋、不套決鬥）",
           shield: "不主動攻擊；相鄰非盾友軍 50% 傷害轉移；對自身實際承受傷害 100% 反震",
@@ -742,6 +820,6 @@ class GameEngine {
   }
 }
 
-const FiveLineEngine = { GameEngine, TYPES, DECK_TEMPLATE, baseStats, cardCost, ALPHA_TURN_ORDER };
+const FiveLineEngine = { GameEngine, TYPES, DECK_TEMPLATE, baseStats, cardCost, ALPHA_TURN_ORDER, OVERTIME_RULES, PASSIVITY_FORFEIT_ROUNDS };
 if (typeof module !== "undefined" && module.exports) module.exports = FiveLineEngine;
 if (typeof globalThis !== "undefined") globalThis.FiveLineEngine = FiveLineEngine;

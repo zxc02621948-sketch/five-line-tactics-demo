@@ -174,10 +174,19 @@
     const owner = mode === "pve" && engine.current === 2 ? "P2（電腦）" : `P${engine.current}`;
     const winnerLabel = resigned
       ? `P${resigned} 棄賽｜P${3 - resigned} 獲勝`
+      : engine.winner === "double_loss" ? "消極對局：雙方棄賽"
       : engine.winner === "draw" ? "雙方同時五連：平手" : `P${engine.winner} 獲勝`;
+    const phase = AlphaUI.matchPhaseLabel({
+      overtime: engine.overtime,
+      overtimeRound: engine.overtime ? engine.roundNo - engine.overtimeStartRound : 0,
+      overtimeRules: GameEngine.overtimeRules(),
+      quietRounds: engine.quietRounds,
+      passivityForfeitRounds: GameEngine.overtimeRules().passivityForfeitRounds,
+    });
     $("#turnText").textContent = finished()
       ? winnerLabel
-      : `第 ${engine.roundNo} 輪｜${owner} 行動｜${engine.actionsThisRound === 0 ? "先手" : "後手"}`;
+      : `第 ${engine.roundNo} 輪｜${owner} 行動｜${engine.actionsThisRound === 0 ? "先手" : "後手"}`
+        + (phase ? `　${phase}` : "");
     updateStatusText();
     $("#artilleryOverview").textContent =
       `炮擊資源｜P1：${engine.players[0].artillery} 發｜P2：${engine.players[1].artillery} 發`;

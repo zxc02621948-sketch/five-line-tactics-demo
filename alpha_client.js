@@ -267,9 +267,12 @@
       $("#privacyInfo").style.display = "none";
       return;
     }
-    $("#turnText").textContent = `第 ${state.roundNo} 輪｜P${state.firstPlayer} 先行｜現在 P${state.current}${state.turnOrderMode === "fixed" ? "｜本局固定順序" : ""}`;
+    const phase = AlphaUI.matchPhaseLabel(state);
+    $("#turnText").textContent = `第 ${state.roundNo} 輪｜P${state.firstPlayer} 先行｜現在 P${state.current}${state.turnOrderMode === "fixed" ? "｜本局固定順序" : ""}`
+      + (phase ? `　${phase}` : "");
     $("#turnStatus").textContent = state.gameOver
-      ? state.winner === "draw" ? "雙方同時五連：平手" : `P${state.winner} 獲勝`
+      ? state.winner === "double_loss" ? "消極對局：雙方棄賽"
+        : state.winner === "draw" ? "雙方同時五連：平手" : `P${state.winner} 獲勝`
       : !opponentConnected ? "對手已斷線，等待重連"
       : state.current === selfPid
         ? state.artilleryUsedThisTurn ? "輪到你：炮擊已使用，必須完成部署" : "輪到你：可先炮擊，然後部署"
@@ -288,7 +291,7 @@
     if (state.gameOver) {
       summarySection.classList.remove("hidden");
       const ownRounds = state.logs.filter(item => item.kind === (selfPid === 1 ? "r" : "b") && item.text.includes("炮擊")).map(item => item.round);
-      summarySection.querySelector("#matchSummary").textContent = `勝負：${state.winner === "draw" ? "平手" : `P${state.winner}`}\n最終輪數：${state.roundNo}\n你的炮擊輪數：${ownRounds.join("、") || "未使用"}\n剩餘炮擊：P1 ${state.artillery[1]}／P2 ${state.artillery[2]}\n${cardLine("P1 卡片", p1Cards)}\n${cardLine("P2 卡片", p2Cards)}`;
+      summarySection.querySelector("#matchSummary").textContent = `勝負：${state.winner === "double_loss" ? "雙方棄賽" : state.winner === "draw" ? "平手" : `P${state.winner}`}\n最終輪數：${state.roundNo}\n你的炮擊輪數：${ownRounds.join("、") || "未使用"}\n剩餘炮擊：P1 ${state.artillery[1]}／P2 ${state.artillery[2]}\n${cardLine("P1 卡片", p1Cards)}\n${cardLine("P2 卡片", p2Cards)}`;
     } else summarySection.classList.add("hidden");
   }
 

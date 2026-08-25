@@ -71,7 +71,14 @@
   }
 
   // 規則視窗
+  // 加賽／消極判負的參數一律向引擎要，UI 不自己抄 3 輪或 10%。
+  function liveOvertimeRules() {
+    const engine = globalThis.FiveLineEngine && globalThis.FiveLineEngine.GameEngine;
+    return engine && engine.overtimeRules ? engine.overtimeRules() : null;
+  }
+
   function rulesHtml(catalog) {
+    const ot = liveOvertimeRules();
     const row = type => {
       const info = catalog[type], one = info.ranks[1];
       return `<tr><td>${ICONS[type]} ${info.name}</td><td>${one.maxHp}／${one.atk}</td>`
@@ -93,7 +100,24 @@
       <ul>
         <li>橫、直、斜任一方向連成 5 顆<b>並且戰鬥後仍然存活</b>，才算獲勝。</li>
         <li>放下第五顆<b>不會</b>立刻獲勝；要撐過該回合的戰鬥結算。</li>
-        <li>雙方同時達成五連時為平手。</li>
+        <li>雙方<b>同一回合</b>都達成五連時不判平手，改為進入<b>加賽</b>。</li>
+      </ul>
+
+      <h3>加賽</h3>
+      <ul>
+        <li>進入加賽後，<b>只有單方五連才判勝</b>；雙方都有或雙方都沒有，對局繼續。</li>
+        <li>加賽期間<b>照常部署新棋、照常結算戰鬥</b>。</li>
+        ${ot ? `<li>加賽第 ${ot.graceRounds} 輪過後，之後每一輪<b>全場所有單位</b>扣除`
+          + ` <b>最大生命的 ${Math.round(ot.decayRate * 100)}%</b>，敵我一視同仁。</li>`
+          + `<li>線會被扣血打斷，所以撐得久的一方獲勝——用高生命的兵種組線在加賽比較有利。</li>` : ""}
+      </ul>
+
+      <h3>消極對局</h3>
+      <ul>
+        ${ot ? `<li><b>雙方</b>連續 ${ot.passivityForfeitRounds} 輪都沒有發生任何戰鬥，`
+          + `視為消極對局，<b>雙方棄賽、判雙敗</b>。</li>` : ""}
+        <li>只要該回合有任何一場戰鬥發生，計數就<b>歸零重算</b>。</li>
+        <li>單方閃避不會構成消極——不去接觸對手就等於不擋對方的線，那本來就會輸得更快。</li>
       </ul>
 
       <h3>回合流程</h3>
@@ -345,9 +369,32 @@
     return { open, close };
   }
 
+  // 加賽／消極倒數的統一文案。兩個客戶端共用，數值一律從引擎送來的
+  // overtimeRules 讀，UI 不自己抄 3 輪或 10%。
+  function matchPhaseLabel(view) {
+    if (!view) return "";
+    const rules = view.overtimeRules || {};
+    const parts = [];
+    if (view.overtime) {
+      const round = view.overtimeRound || 0;
+      const grace = rules.graceRounds ?? 0;
+      const pct = Math.round((rules.decayRate ?? 0) * 100);
+      parts.push(round > grace
+        ? `⚔ 加賽第 ${round} 輪｜每輪全盤 -${pct}% 最大生命`
+        : `⚔ 加賽第 ${round} 輪｜再 ${grace - round + 1} 輪後開始全盤扣血`);
+    }
+    const limit = view.passivityForfeitRounds ?? rules.passivityForfeitRounds;
+    const quiet = view.quietRounds || 0;
+    if (limit && quiet > 0) {
+      parts.push(`⚠ 雙方已 ${quiet} 輪未交戰｜再 ${limit - quiet} 輪判雙敗`);
+    }
+    return parts.join("　");
+  }
+
   globalThis.AlphaUI = {
     ICONS, NAMES, SHORT_TAG, ELITE_TAG, ABILITY, ELITE_ABILITY,
     handCardHtml, unitHtml, unitTitle, cardDetailHtml, renderCardDetail, rulesHtml, wireRulesOverlay,
     autoSizeBoard, forecast, focusOn, drawForecast, forecastArtillery, drawArtillery,
+    matchPhaseLabel,
   };
 })();

@@ -560,3 +560,32 @@ test("炮擊預覽會區分敵我並清乾淨", () => {
   // 移開瞄準格時統計要一起清掉，不能留著舊數字
   assert.match(localClient, /if \(artilleryPlan\) \{ artilleryPlan = null; updateStatusText\(\); \}/);
 });
+
+test("規則視窗必須說明加賽與消極判負，且不自己抄數值", () => {
+  const rules = sharedUi.match(/function rulesHtml\(catalog\)[\s\S]*?\n  }/)[0];
+  // 舊的「同時五連＝平手」已經不成立，不可以留在規則裡
+  assert.doesNotMatch(rules, /雙方同時達成五連時為平手/, "同時五連現在進加賽，不是平手");
+  assert.match(rules, /進入<b>加賽<\/b>/);
+  assert.match(rules, /只有單方五連才判勝/);
+  assert.match(rules, /雙方棄賽、判雙敗/);
+  // 數值一律來自引擎
+  assert.match(rules, /ot\.graceRounds/);
+  assert.match(rules, /ot\.decayRate/);
+  assert.match(rules, /ot\.passivityForfeitRounds/);
+  assert.doesNotMatch(rules, /連續 3 輪|扣除 10%|加賽第 3 輪過後/, "不得把 3 輪／10% 寫死在文案裡");
+  assert.match(sharedUi, /globalThis\.FiveLineEngine.*GameEngine/);
+});
+
+test("加賽與消極倒數的狀態列文案兩端共用", () => {
+  assert.match(sharedUi, /function matchPhaseLabel\(view\)/);
+  // 倒數數字由 overtimeRules 推導，不是常數
+  const label = sharedUi.match(/function matchPhaseLabel\(view\)[\s\S]*?\n  }/)[0];
+  assert.match(label, /rules\.graceRounds/);
+  assert.match(label, /rules\.decayRate/);
+  assert.doesNotMatch(label, /再 3 輪|[^a-zA-Z]10%/, "倒數與百分比不得寫死");
+  for (const [name, text] of [["local_client.js", localClient], ["alpha_client.js", client]]) {
+    assert.match(text, /AlphaUI\.matchPhaseLabel\(/, `${name} 必須顯示加賽／消極狀態`);
+  }
+  // 連線端直接吃 server 送來的整包 state
+  assert.match(client, /AlphaUI\.matchPhaseLabel\(state\)/);
+});

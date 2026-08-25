@@ -54,11 +54,19 @@ const G=20000;
 console.log(`${G} 局爭奪型對局，只有同時五連的那些會進加賽。緩衝 ${GRACE} 輪\n`);
 console.log("每輪扣血 | 進加賽的局 | 加賽收斂 | 加賽長度(輪) | 最長 | 打不完");
 console.log("-".repeat(72));
-for(const rate of [0.10,0.15]){
+function pctl(a,q){const s=[...a].sort((x,y)=>x-y);return s[Math.min(s.length-1,Math.floor(s.length*q))];}
+for(const rate of [0.10]){
   const S={normal:0,w1:0,w2:0,otLen:[],neverEnds:0};
   for(let i=0;i<G;i++) play(11000+i*7919, rate, S);
   const ot=S.w1+S.w2+S.neverEnds;
   console.log(`${(rate*100+"%").padStart(8)} |${(pct(ot,G)+` (${ot})`).padStart(12)}`
     +`|${pct(S.w1+S.w2,ot).padStart(10)}|${avg(S.otLen).padStart(14)}`
     +`|${String(S.otLen.length?Math.max(...S.otLen):"—").padStart(6)}|${pct(S.neverEnds,ot).padStart(8)}`);
+  const L=S.otLen;
+  console.log(`
+加賽長度分布（n=${L.length}）：中位 ${pctl(L,0.5)}｜p75 ${pctl(L,0.75)}｜p90 ${pctl(L,0.90)}`
+    +`｜p95 ${pctl(L,0.95)}｜p99 ${pctl(L,0.99)}｜最長 ${Math.max(...L)}`);
+  for(const k of [5,10,15,20,30,50])
+    console.log(`  超過 ${String(k).padStart(2)} 輪的加賽：${pct(L.filter(x=>x>k).length,L.length).padStart(6)}`
+      + `　（佔全部對局 ${pct(L.filter(x=>x>k).length,G)}）`);
 }
