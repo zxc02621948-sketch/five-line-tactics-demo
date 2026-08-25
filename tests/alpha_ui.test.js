@@ -448,16 +448,59 @@ test("兩個模式都有直接前往對方的按鈕", () => {
   assert.match(html, /class="btn modeLink" href="\/local">🎮 單機測試/);
 });
 
-test("對局進行中隱藏模式切換與重開，改提供棄賽", () => {
+test("對局進行中隱藏模式切換，但「重開」永遠留著", () => {
   const resignTag = localHtml.match(/<button[^>]*id="resignBtn"[^>]*>/)[0];
   assert.match(resignTag, /class="[^"]*hidden[^"]*"/, "棄賽鈕預設隱藏");
   assert.match(localClient, /function renderSessionControls\(\)/);
   // 開始判定：盤面上有棋子
   assert.match(localClient, /const started = \(\) => Boolean\(engine\) && engine\.board\.some\(row => row\.some\(Boolean\)\)/);
-  // 對局中三顆鈕一起隱藏
-  assert.match(localClient, /for \(const id of \["#pveBtn", "#pvpBtn", "#resetBtn"\]\)/);
+  // 對局中隱藏的只有模式切換
+  assert.match(localClient, /for \(const id of \["#pveBtn", "#pvpBtn"\]\)/);
   assert.match(localClient, /classList\.toggle\("hidden", inGame\)/);
   assert.match(localClient, /resign\.classList\.toggle\("hidden", !inGame\)/);
+  // 重開不得跟著隱藏：手牌用完時無法部署，但引擎不會判定對局結束，
+  // 跟著藏起來會把玩家鎖死在動不了的局面（實測 6.07% 的對局會走到那裡）
+  assert.doesNotMatch(localClient, /\["#pveBtn", "#pvpBtn", "#resetBtn"\]/,
+    "重開不可以跟模式鈕一起隱藏");
+  assert.match(localClient, /\$\("#resetBtn"\)\.classList\.remove\("hidden"\)/);
+});
+
+test("無法行動的局面要說明原因並指向重開", () => {
+  // 引擎不會為「手牌用完」判定結束，UI 必須自己認出來
+  assert.match(localClient, /const canAct = \(\)[\s\S]{0,160}hand\.length > 0 && engine\.hasEmptyCell\(\)/);
+  assert.match(localClient, /手牌已用完[\s\S]{0,60}無法部署/);
+  assert.match(localClient, /棋盤已滿/);
+  assert.match(localClient, /請按「重開」/);
+});
+
+test("引擎確實會留下「不能行動但 gameOver 為 false」的局面", () => {
+  // 這是規則層的洞，不是 UI 的錯；UI 只能保證玩家有出路。
+  // 確定性地掃前 200 個種子，找出第一局走進死局的；一路隨機落子。
+  const playSeed = start => {
+    let seed = start >>> 0;
+    const rnd = max => { seed = (seed * 1664525 + 1013904223) >>> 0; return Math.floor((seed / 4294967296) * max); };
+    const engine = new GameEngine({ roomCode: "STUCK", turnOrderMode: "fixed", startingPlayer: 1, randomInt: rnd });
+    let guard = 0;
+    while (!engine.gameOver && guard++ < 400) {
+      const hand = engine.players[engine.current - 1].hand;
+      if (!hand.length || !engine.hasEmptyCell()) return { engine, stuck: true };
+      const empties = [];
+      for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!engine.board[r][c]) empties.push([r, c]);
+      const [r, c] = empties[rnd(empties.length)];
+      if (!engine.deploy(engine.current, { r, c, type: hand[0], rank: 1, turnId: engine.turnId }).ok) break;
+    }
+    return { engine, stuck: false };
+  };
+  let found = null;
+  for (let i = 0; i < 200 && !found; i++) {
+    const result = playSeed(1234 + i * 7919);
+    if (result.stuck) found = result;
+  }
+  assert.ok(found, "200 個種子內應該至少有一局走進死局（實測約 6% 的對局會）");
+  const { engine } = found;
+  assert.equal(engine.gameOver, false, "引擎不會為這個局面判定結束");
+  assert.equal(engine.players[engine.current - 1].hand.length === 0 || !engine.hasEmptyCell(), true,
+    "卡住的原因是沒手牌或沒空格");
 });
 
 test("棄賽會結束對局且不修改引擎規則", () => {

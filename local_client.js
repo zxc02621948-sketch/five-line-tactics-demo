@@ -26,6 +26,10 @@
   const started = () => Boolean(engine) && engine.board.some(row => row.some(Boolean));
   const humanTurn = () => engine && !finished() && !aiThinking
     && (mode === "pvp" || engine.current === 1);
+  // 手牌用完時引擎不會判定對局結束，但這一方已經無法部署。
+  // 這個狀態必須讓玩家看得出來，而且一定要留一條出路。
+  const canAct = () => Boolean(engine) && !finished()
+    && engine.players[engine.current - 1].hand.length > 0 && engine.hasEmptyCell();
 
   function reset() {
     // 對電腦與本機雙人都使用正式回合順序：固定 P1 → P2 → combat
@@ -213,6 +217,10 @@
   function updateStatusText() {
     const text = finished()
       ? "按「重開」開始新的一局，或切換對戰模式。"
+      : !canAct()
+        ? (engine.players[engine.current - 1].hand.length === 0
+            ? `P${engine.current} 手牌已用完、牌庫也沒有可抽的牌，本方無法部署。目前規則沒有這個局面的解法，請按「重開」。`
+            : "棋盤已滿，沒有可部署的位置。請按「重開」。")
       : artilleryMode ? (artilleryPlan
           ? `炮擊瞄準中：命中敵軍 ${artilleryPlan.enemies}、友軍 ${artilleryPlan.allies}`
             + `｜預計擊殺 ${artilleryPlan.kills}、誤殺友軍 ${artilleryPlan.losses}`
@@ -227,9 +235,13 @@ ${notice}` : text;
   // 尚未落子或對局結束時才恢復，讓玩家可以自由換模式。
   function renderSessionControls() {
     const inGame = started() && !finished();
-    for (const id of ["#pveBtn", "#pvpBtn", "#resetBtn"]) {
+    // 對局中隱藏的是「模式切換」——中途換模式會讓當下局面失去意義。
+    for (const id of ["#pveBtn", "#pvpBtn"]) {
       $(id).classList.toggle("hidden", inGame);
     }
+    // 「重開」永遠留著。手牌用完時無法部署，但引擎不會判定對局結束，
+    // 這時若連重開都藏起來，玩家會被鎖死在一個動不了的局面。
+    $("#resetBtn").classList.remove("hidden");
     const resign = $("#resignBtn");
     resign.classList.toggle("hidden", !inGame);
     resign.textContent = mode === "pve" ? "棄賽" : "結束對局";
