@@ -267,9 +267,13 @@
       $("#privacyInfo").style.display = "none";
       return;
     }
-    const phase = AlphaUI.matchPhaseLabel(state);
-    $("#turnText").textContent = `第 ${state.roundNo} 輪｜P${state.firstPlayer} 先行｜現在 P${state.current}${state.turnOrderMode === "fixed" ? "｜本局固定順序" : ""}`
-      + (phase ? `　${phase}` : "");
+    const phase = state.gameOver ? { text: "", full: "", level: "none" } : AlphaUI.matchPhaseLabel(state);
+    // 警示走獨立的固定格；turnText 是 nowrap+ellipsis，塞進去會被截掉。
+    const badge = $("#phaseBadge");
+    if (badge) { badge.textContent = phase.text;
+    badge.className = `phaseBadge ${phase.level === "none" ? "" : phase.level}`.trim();
+    badge.title = phase.full || phase.text; }
+    $("#turnText").textContent = `第 ${state.roundNo} 輪｜P${state.firstPlayer} 先行｜現在 P${state.current}${state.turnOrderMode === "fixed" ? "｜本局固定順序" : ""}`;
     $("#turnStatus").textContent = state.gameOver
       ? state.winner === "double_loss" ? "消極對局：雙方棄賽"
         : state.winner === "draw" ? "雙方同時五連：平手" : `P${state.winner} 獲勝`

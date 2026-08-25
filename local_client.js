@@ -176,17 +176,22 @@
       ? `P${resigned} 棄賽｜P${3 - resigned} 獲勝`
       : engine.winner === "double_loss" ? "消極對局：雙方棄賽"
       : engine.winner === "draw" ? "雙方同時五連：平手" : `P${engine.winner} 獲勝`;
-    const phase = AlphaUI.matchPhaseLabel({
+    const otRules = GameEngine.overtimeRules();
+    const phase = finished() ? { text: "", full: "", level: "none" } : AlphaUI.matchPhaseLabel({
       overtime: engine.overtime,
       overtimeRound: engine.overtime ? engine.roundNo - engine.overtimeStartRound : 0,
-      overtimeRules: GameEngine.overtimeRules(),
+      overtimeRules: otRules,
       quietRounds: engine.quietRounds,
-      passivityForfeitRounds: GameEngine.overtimeRules().passivityForfeitRounds,
+      passivityForfeitRounds: otRules.passivityForfeitRounds,
     });
+    // 警示走獨立的固定格；turnText 是 nowrap+ellipsis，塞進去會被截掉。
+    const badge = $("#phaseBadge");
+    if (badge) { badge.textContent = phase.text;
+    badge.className = `phaseBadge ${phase.level === "none" ? "" : phase.level}`.trim();
+    badge.title = phase.full || phase.text; }
     $("#turnText").textContent = finished()
       ? winnerLabel
-      : `第 ${engine.roundNo} 輪｜${owner} 行動｜${engine.actionsThisRound === 0 ? "先手" : "後手"}`
-        + (phase ? `　${phase}` : "");
+      : `第 ${engine.roundNo} 輪｜${owner} 行動｜${engine.actionsThisRound === 0 ? "先手" : "後手"}`;
     updateStatusText();
     $("#artilleryOverview").textContent =
       `炮擊資源｜P1：${engine.players[0].artillery} 發｜P2：${engine.players[1].artillery} 發`;

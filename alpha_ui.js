@@ -371,24 +371,53 @@
 
   // 加賽／消極倒數的統一文案。兩個客戶端共用，數值一律從引擎送來的
   // overtimeRules 讀，UI 不自己抄 3 輪或 10%。
+  // 回傳 { text, full, level }。
+  // text 是要塞進固定寬警示條的緊湊版（實測側欄只有約 200px，
+  // 完整句子會被 ellipsis 截掉）；full 給 title 當補充說明。
+  // 數值一律從引擎送來的 overtimeRules 讀，UI 不自己抄 3 輪或 10%。
+  const RANK = { none: 0, info: 1, warn: 2, danger: 3 };
   function matchPhaseLabel(view) {
-    if (!view) return "";
+    const empty = { text: "", full: "", level: "none" };
+    if (!view) return empty;
     const rules = view.overtimeRules || {};
-    const parts = [];
-    if (view.overtime) {
-      const round = view.overtimeRound || 0;
-      const grace = rules.graceRounds ?? 0;
-      const pct = Math.round((rules.decayRate ?? 0) * 100);
-      parts.push(round > grace
-        ? `⚔ 加賽第 ${round} 輪｜每輪全盤 -${pct}% 最大生命`
-        : `⚔ 加賽第 ${round} 輪｜再 ${grace - round + 1} 輪後開始全盤扣血`);
-    }
+
+    const round = view.overtimeRound || 0;
+    const grace = rules.graceRounds ?? 0;
+    const pct = Math.round((rules.decayRate ?? 0) * 100);
+    const decaying = round > grace;
+    const inOvertime = Boolean(view.overtime);
+
     const limit = view.passivityForfeitRounds ?? rules.passivityForfeitRounds;
     const quiet = view.quietRounds || 0;
-    if (limit && quiet > 0) {
-      parts.push(`⚠ 雙方已 ${quiet} 輪未交戰｜再 ${limit - quiet} 輪判雙敗`);
+    const quietLeft = limit ? limit - quiet : 0;
+    const warnQuiet = Boolean(limit && quiet > 0);
+
+    if (!inOvertime && !warnQuiet) return empty;
+
+    // 兩則同時出現時，兩邊都再縮一級才塞得下
+    const both = inOvertime && warnQuiet;
+    const text = [], full = [];
+    if (inOvertime) {
+      full.push(decaying
+        ? `加賽第 ${round} 輪：每輪全場扣最大生命的 ${pct}%`
+        : `加賽第 ${round} 輪：再 ${grace - round + 1} 輪後開始全場扣血`);
+      text.push(both ? `⚔ 加賽 ${round}`
+        : decaying ? `⚔ 加賽 ${round}｜每輪 -${pct}% HP`
+          : `⚔ 加賽 ${round}｜${grace - round + 1} 輪後扣血`);
     }
-    return parts.join("　");
+    if (warnQuiet) {
+      full.push(`雙方已連續 ${quiet} 輪沒有任何戰鬥，再 ${quietLeft} 輪雙方棄賽判雙敗`);
+      text.push(both ? `⚠ 再 ${quietLeft} 輪雙敗` : `⚠ ${quiet} 輪未交戰｜再 ${quietLeft} 輪雙敗`);
+    }
+
+    let level = "none";
+    const raise = next => { if (RANK[next] > RANK[level]) level = next; };
+    if (inOvertime) raise(decaying ? "warn" : "info");
+    // 最後一次機會要最醒目。部署不限落點，隨時可以貼上去製造交戰，
+    // 所以即使只剩 1 輪這個警告仍然是可行動的。
+    if (warnQuiet) raise(quietLeft <= 1 ? "danger" : "warn");
+
+    return { text: text.join("　"), full: full.join("；"), level };
   }
 
   globalThis.AlphaUI = {

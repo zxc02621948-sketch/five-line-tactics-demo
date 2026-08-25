@@ -248,7 +248,9 @@ body {
 
 .turnSection {
   display: grid;
-  grid-template-rows: 20px 28px 42px 40px 47px minmax(0, 1fr);
+  /* 多一列 22px 給加賽／消極警示條。這一列永遠存在，沒有警示時是空的，
+     不會因為出現或消失而把下面的東西擠上擠下。 */
+  grid-template-rows: 20px 28px 22px 42px 40px 47px minmax(0, 1fr);
   gap: 6px;
 }
 
@@ -262,6 +264,26 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* 警示條：固定佔位，靠 level class 上色。空字串時完全透明。 */
+.phaseBadge {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+  color: transparent;
+}
+.phaseBadge.info   { background: rgba(77, 171, 247, .16); color: var(--p2); }
+.phaseBadge.warn   { background: rgba(255, 212, 59, .16); color: var(--warn); }
+.phaseBadge.danger { background: rgba(255, 59, 48, .20);  color: var(--danger); }
 
 .status {
   min-height: 0;

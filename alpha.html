@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>五連戰線｜遠端真人 Alpha</title>
   <link rel="icon" href="/icon-192.png">
-  <link rel="stylesheet" href="/alpha_board.css?v=9">
-  <link rel="stylesheet" href="/game_shell.css?v=9">
-  <link rel="stylesheet" href="/local_layout.css?v=9">
+  <link rel="stylesheet" href="/alpha_board.css?v=11">
+  <link rel="stylesheet" href="/game_shell.css?v=11">
+  <link rel="stylesheet" href="/local_layout.css?v=11">
   <style>
     /* 只保留連線專屬的樣式；版面一律沿用與單機相同的 game_shell + local_layout。 */
     .lobby { display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; }
@@ -65,6 +65,7 @@
       <div class="section turnSection">
         <h3>目前回合</h3>
         <div id="turnText" class="turn"></div>
+        <div id="phaseBadge" class="phaseBadge"></div>
         <div id="turnStatus" class="status actionStatus"></div>
         <div id="artilleryOverview" class="status artilleryStatus">炮擊資源｜P1：2｜P2：2</div>
         <button id="artilleryBtn" class="btn artBtn ready" disabled>炮擊</button>

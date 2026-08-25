@@ -589,3 +589,77 @@ test("加賽與消極倒數的狀態列文案兩端共用", () => {
   // 連線端直接吃 server 送來的整包 state
   assert.match(client, /AlphaUI\.matchPhaseLabel\(state\)/);
 });
+
+/* ---- 真的執行 alpha_ui.js，而不是只比對原始碼字串 ----
+   先前這支檔案全部是文字比對，所以 matchPhaseLabel 從回傳字串
+   改成回傳 { text, level } 時，93 個測試沒有任何一個發現。 */
+const AlphaUI = (() => {
+  require("../game_engine");                     // 設定 globalThis.FiveLineEngine
+  const vm = require("node:vm");
+  vm.runInThisContext(sharedUi, { filename: "alpha_ui.js" });
+  return globalThis.AlphaUI;
+})();
+
+test("matchPhaseLabel 實際執行：回傳 { text, full, level } 且倒數正確", () => {
+  const rules = GameEngine.overtimeRules();
+  const call = view => AlphaUI.matchPhaseLabel({ ...view, overtimeRules: rules,
+    passivityForfeitRounds: rules.passivityForfeitRounds });
+
+  // 沒事時必須是空字串＋none，警示條才會保持透明而不是畫一個空盒子
+  assert.deepEqual(call({}), { text: "", full: "", level: "none" });
+  assert.deepEqual(AlphaUI.matchPhaseLabel(null), { text: "", full: "", level: "none" });
+
+  // 消極倒數：剩 1 輪要升到 danger
+  const q1 = call({ quietRounds: 1 });
+  assert.equal(q1.text, "⚠ 1 輪未交戰｜再 2 輪雙敗");
+  assert.match(q1.full, /雙方已連續 1 輪沒有任何戰鬥，再 2 輪雙方棄賽判雙敗/);
+  assert.equal(q1.level, "warn");
+  const q2 = call({ quietRounds: 2 });
+  assert.equal(q2.text, "⚠ 2 輪未交戰｜再 1 輪雙敗");
+  assert.equal(q2.level, "danger", "最後一次機會要最醒目");
+
+  // 加賽：緩衝內是 info，開始扣血後升到 warn
+  const g1 = call({ overtime: true, overtimeRound: 1 });
+  assert.equal(g1.text, "⚔ 加賽 1｜3 輪後扣血");
+  assert.equal(g1.level, "info");
+  assert.equal(call({ overtime: true, overtimeRound: 3 }).text, "⚔ 加賽 3｜1 輪後扣血");
+  const d = call({ overtime: true, overtimeRound: 4 });
+  assert.equal(d.text, "⚔ 加賽 4｜每輪 -10% HP");
+  assert.equal(d.level, "warn");
+
+  // 兩者同時出現時取較急迫的等級，而且兩邊都要再縮短才塞得進固定寬的警示條
+  const both = call({ overtime: true, overtimeRound: 2, quietRounds: 2 });
+  assert.equal(both.text, "⚔ 加賽 2　⚠ 再 1 輪雙敗");
+  assert.equal(both.level, "danger");
+  assert.ok(both.text.length < call({ overtime: true, overtimeRound: 2 }).text.length
+    + call({ quietRounds: 2 }).text.length, "同時出現時必須比兩則各自的完整版更短");
+  // full 不縮，兩件事都要說清楚
+  assert.match(both.full, /加賽第 2 輪/);
+  assert.match(both.full, /再 1 輪雙方棄賽判雙敗/);
+});
+
+test("警示條有固定佔位，不會因出現或消失擠壓其他元件", () => {
+  for (const [name, page] of [["index.html", localHtml], ["alpha.html", html]]) {
+    assert.match(page, /<div id="phaseBadge" class="phaseBadge"><\/div>/, `${name} 需要警示條`);
+  }
+  // turnSection 是固定列高的 grid，警示條必須是其中一列而不是動態插入
+  const block = layoutCss.match(/\.turnSection\s*\{[\s\S]*?\}/);
+  assert.ok(block, "找不到 .turnSection 樣式");
+  const rows = stripComments(block[0].replace(/\/\*[\s\S]*?\*\//g, ""))
+    .match(/grid-template-rows:\s*([^;]+);/);
+  assert.ok(rows, "turnSection 必須用固定列高");
+  // minmax(0, 1fr) 內部有空格，先把括號裡的空白收掉才數得對
+  const tracks = rows[1].trim().replace(/\([^)]*\)/g, m => m.replace(/\s+/g, "")).split(/\s+/);
+  assert.equal(tracks.length, 7,
+    `多一列給警示條，共 7 列，實際是「${rows[1].trim()}」`);
+  assert.equal(tracks[2], "22px", "警示條那一列要有固定高度");
+  // 空的時候完全透明，不畫空盒子
+  assert.match(layoutCss, /\.phaseBadge\s*\{[^}]*background:\s*transparent[^}]*\}/s);
+  assert.match(layoutCss, /\.phaseBadge\.danger\s*\{/);
+  // 警示不可以塞回會被截斷的 turnText
+  for (const [name, text] of [["local_client.js", localClient], ["alpha_client.js", client]]) {
+    assert.match(text, /#phaseBadge/, `${name} 必須寫進警示條`);
+    assert.doesNotMatch(text, /turnText"\)\.textContent[^;]*phase\.text/,
+      `${name} 不可以把警示塞進 nowrap+ellipsis 的 turnText`);
+  }
+});
