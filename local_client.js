@@ -151,7 +151,12 @@
   }
 
   function renderCardDetail() {
-    UI.renderCardDetail($("#cardDetail"), hoverType || selectedType, catalog());
+    // 觸控裝置沒有 hover，點選是它唯一能叫出大卡的方式，所以保留
+    // selectedType 當後備；但在有 hover 的裝置上不能這樣，否則選完牌
+    // 大卡會一直蓋在棋盤上擋住落子——點完牌滑鼠還在該張牌上所以仍看得到，
+    // 一往棋盤移動 mouseleave 就會把它收起來。
+    const noHover = typeof matchMedia === "function" && matchMedia("(hover: none)").matches;
+    UI.renderCardDetail($("#cardDetail"), hoverType || (noHover ? selectedType : null), catalog());
   }
 
   function renderLogs() {

@@ -190,6 +190,8 @@
   border: 1px solid #4b5870;
   box-shadow: 0 14px 40px #000b;
   font-size: 13px; line-height: 1.85; color: #dbe4f0;
+  /* 純資訊浮層：疊在棋盤上時絕對不能吃掉點擊，否則會擋住落子。 */
+  pointer-events: none;
 }
 .cardDetail.idle { display: none; }
 .cardDetail .detailHead { font-size: 17px; font-weight: 800; margin-bottom: 6px; }

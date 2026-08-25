@@ -327,8 +327,24 @@ test("觸控裝置不依賴 hover：點選手牌即可看到同一份詳情", ()
     const end = text.indexOf("function renderCardDetail()");
     assert.ok(start > 0 && end > start);
     assert.match(text.slice(start, end), /renderCardDetail\(\);/);
-    assert.match(text, /hoverType \|\| selectedType/);
+    // 觸控沒有 hover，selectedType 是它唯一的後備來源
+    assert.match(text, /matchMedia\("\(hover: none\)"\)/);
+    assert.match(text, /hoverType \|\| \(noHover \? selectedType : null\)/);
   }
+});
+
+test("有 hover 的裝置上，選取手牌不會把大卡釘住擋住棋盤", () => {
+  for (const [name, text] of [["local_client.js", localClient], ["alpha_client.js", client]]) {
+    // 不可以無條件用 selectedType——那會讓大卡在選完牌後一直蓋在棋盤上
+    assert.doesNotMatch(text, /hoverType \|\| selectedType/,
+      `${name} 選取後不得無條件顯示大卡`);
+  }
+  // 大卡是疊在棋盤上的 absolute 浮層，無論如何都不能吃掉點擊
+  const block = css.match(/^\.cardDetail\s*\{[\s\S]*?\}/m);
+  assert.ok(block, "找不到 .cardDetail 樣式");
+  assert.match(block[0], /position:\s*absolute/);
+  assert.match(block[0], /pointer-events:\s*none/,
+    "純資訊浮層必須讓點擊穿透，否則會擋住落子");
 });
 
 test("engine 提供權威數值給 UI，前端不自行硬編數值", () => {
