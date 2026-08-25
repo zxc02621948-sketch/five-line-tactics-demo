@@ -18,6 +18,7 @@
   let connected = false;
   let roomCode = null;
   let selfPid = null;
+  let rematchState = { self: false, opponent: false };
   let opponentConnected = false;
   let roomStatus = "none";
   let state = null;
@@ -78,6 +79,7 @@
         opponentConnected = message.opponentConnected;
         roomStatus = message.status;
         state = message.state;
+        rematchState = message.rematch || { self: false, opponent: false };
         pendingRequest = false;
         if (!state || state.current !== selfPid || state.turnId !== previousTurnId) {
           selectedType = null; selectedRank = 1; artilleryMode = false;
@@ -87,6 +89,14 @@
         notice = message.error;
       } else if (message.type === "accepted") {
         notice = "";
+      } else if (message.type === "left") {
+        // 主動離開：把本機的房間狀態清乾淨，才不會拿舊房的 state 去比對新的 selfPid
+        roomCode = null; selfPid = null; state = null; roomStatus = null;
+        opponentConnected = false; rematchState = { self: false, opponent: false };
+        pendingRequest = false; artilleryMode = false; selectedType = null;
+        localStorage.removeItem(sessionKey());
+        notice = "已離開房間。";
+        $("#entryOverlay").classList.remove("hidden");
       } else if (message.type === "match_log_saved") {
         notice = `終局戰報已儲存：${message.filename}`;
       }
@@ -243,8 +253,21 @@
   function render() {
     $("#socketStatus").textContent = connected ? "伺服器已連線" : "伺服器未連線";
     $("#socketStatus").className = `connection ${connected ? "ok" : "bad"}`;
+    // 入座後就不再顯示建立／加入：先前可以在對局中跳到別的房，
+    // 結果是對手被永久留在「對手已斷線」，自己也可能佔到自己那間房的另一個座位。
+    const seated = Boolean(roomCode);
+    for (const id of ["#createBtn", "#joinBtn", "#roomInput"]) {
+      $(id).classList.toggle("hidden", seated);
+    }
     $("#createBtn").disabled = !connected;
     $("#joinBtn").disabled = !connected;
+    $("#leaveRoomBtn").classList.toggle("hidden", !seated);
+    const over = Boolean(state?.gameOver);
+    const rematchBtn = $("#rematchBtn");
+    rematchBtn.classList.toggle("hidden", !over);
+    rematchBtn.disabled = !connected || rematchState.self || !opponentConnected;
+    rematchBtn.textContent = rematchState.self ? "已請求，等待對手…"
+      : rematchState.opponent ? "對手想再來一局 ▸ 接受" : "再來一局";
     const modeLabel = (state?.turnOrderMode || requestedMode) === "alternating" ? "｜交替先手（開發測試）" : "";
     $("#roomIdentity").textContent = roomCode ? `房號 ${roomCode}｜你是 P${selfPid}${modeLabel}` : "";
     $("#copyRoomBtn").classList.toggle("hidden", !roomCode);
@@ -257,7 +280,8 @@
       ready: "兩名玩家已連線，準備開始。",
       playing: "雙方連線正常。",
       opponent_disconnected: "對手已斷線；房間會暫時保留，等待原玩家重連。",
-      finished: "本局已結束。",
+      opponent_left: "對手已離開房間，本局無法繼續。請按「離開房間」再開新局。",
+      finished: "本局已結束。雙方都按「再來一局」即可用同一間房再開一場。",
     };
     $("#connectionDetail").textContent = `${statusTexts[roomStatus] || statusTexts.none}${notice ? `\n${notice}` : ""}`;
     $("#connectionDetail").className = `combatPreview ${roomStatus === "opponent_disconnected" || !connected ? "bad" : roomStatus === "waiting" ? "wait" : ""}`;
@@ -327,6 +351,8 @@
   };
   $("#roomInput").addEventListener("keydown", event => { if (event.key === "Enter") $("#joinBtn").click(); });
   $("#artilleryBtn").onclick = () => { if (ownTurn()) { artilleryMode = !artilleryMode; selectedType = null; render(); } };
+  $("#rematchBtn").onclick = () => send({ type: "rematch" });
+  $("#leaveRoomBtn").onclick = () => send({ type: "leave_room" });
 
   render();
   connect();

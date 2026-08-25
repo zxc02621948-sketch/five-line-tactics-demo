@@ -57,6 +57,7 @@ function newSeat(pid, ws) {
     ws,
     connected: true,
     disconnectedAt: null,
+    rematchWanted: false,
     processedRequests: new Map(),
   };
 }
@@ -64,6 +65,7 @@ function newSeat(pid, ws) {
 function roomStatus(room, pid) {
   const opponent = room.players[pid === 1 ? 2 : 1];
   if (room.game?.gameOver) return "finished";
+  if (room.abandoned && !opponent) return "opponent_left";
   if (!room.game) return opponent?.connected ? "ready" : "waiting";
   return opponent?.connected ? "playing" : "opponent_disconnected";
 }
@@ -81,6 +83,7 @@ function broadcastRoom(room) {
       opponentConnected: Boolean(opponent?.connected),
       status: roomStatus(room, pid),
       roomMode: room.mode,
+      rematch: { self: Boolean(seat.rematchWanted), opponent: Boolean(opponent?.rematchWanted) },
       state: room.game ? room.game.visibleStateFor(pid) : null,
     });
   }
@@ -135,6 +138,7 @@ function detachPreviousSession(ws) {
 }
 
 function createRoom(ws, rawMode) {
+  if (blockIfInLiveGame(ws)) return;
   detachPreviousSession(ws);
   const code = roomCode();
   const room = {
@@ -152,10 +156,28 @@ function createRoom(ws, rawMode) {
   broadcastRoom(room);
 }
 
+// 目前坐在哪個房間（沒有就回 null）
+function currentRoom(ws) {
+  return ws.alphaSession ? rooms.get(ws.alphaSession.roomCode) || null : null;
+}
+
+// 進行中的對局不准中途跳槽：那會把對手永久留在「對手已斷線」，
+// 而且自己還可能回頭佔掉自己那間房的另一個座位，兩邊一起卡死。
+function blockIfInLiveGame(ws) {
+  const room = currentRoom(ws);
+  if (room?.game && !room.game.gameOver) {
+    sendJson(ws, { type: "error", error: "你正在一場進行中的對局裡，請先按「離開房間」" });
+    return true;
+  }
+  return false;
+}
+
 function joinRoom(ws, rawCode) {
   const code = String(rawCode || "").trim().toUpperCase();
   const room = rooms.get(code);
   if (!room) return sendJson(ws, { type: "error", error: "找不到這個房間" });
+  if (blockIfInLiveGame(ws)) return;
+  if (currentRoom(ws) === room) return sendJson(ws, { type: "error", error: "你已經在這個房間裡了" });
   if (room.players[2]) return sendJson(ws, { type: "error", error: "房間已有兩名玩家；原玩家請使用重連 token" });
   if (room.game) return sendJson(ws, { type: "error", error: "本房間對局已開始" });
   detachPreviousSession(ws);
@@ -175,6 +197,45 @@ function reconnect(ws, rawCode, token) {
   if (oldSocket && oldSocket !== ws) oldSocket.close(4001, "座位已由重新連線取代");
   attachSocket(ws, room, pid);
   maybeStart(room);
+}
+
+// 再來一局：雙方都按了才重開，沿用同一間房與同一組座位。
+function rematch(ws) {
+  const room = currentRoom(ws);
+  if (!room) return sendJson(ws, { type: "error", error: "尚未加入房間" });
+  if (!room.game?.gameOver) return sendJson(ws, { type: "error", error: "本局尚未結束" });
+  room.players[ws.alphaSession.pid].rematchWanted = true;
+  const bothReady = [1, 2].every(pid => room.players[pid]?.connected && room.players[pid].rematchWanted);
+  if (bothReady) {
+    room.game = new GameEngine({
+      matchId: crypto.randomUUID(),
+      roomCode: room.code,
+      turnOrderMode: room.mode,
+      startingPlayer: room.mode === "fixed" ? ALPHA_TURN_ORDER.startingPlayer : undefined,
+    });
+    room.startedAt = Date.now();
+    room.logSaved = false;
+    room.logPath = null;
+    for (const pid of [1, 2]) {
+      room.players[pid].rematchWanted = false;
+      // 舊局的 requestId 不能沿用，否則會被當成重送而直接回覆舊結果
+      room.players[pid].processedRequests.clear();
+    }
+  }
+  broadcastRoom(room);
+}
+
+// 主動離開：把座位空出來，對手才不會卡在「等待重連」。
+function leaveRoom(ws) {
+  const room = currentRoom(ws);
+  const session = ws.alphaSession;
+  if (!room || !session) return sendJson(ws, { type: "left" });
+  room.players[session.pid] = null;
+  delete ws.alphaSession;
+  sendJson(ws, { type: "left" });
+  // 房間只剩單人且對局還沒結束時，這局已經沒有意義了
+  if (room.game && !room.game.gameOver) room.abandoned = true;
+  broadcastRoom(room);
 }
 
 async function handleAction(ws, message) {
@@ -273,6 +334,8 @@ wss.on("connection", ws => {
     if (message.type === "create_room") createRoom(ws, message.mode);
     else if (message.type === "join_room") joinRoom(ws, message.roomCode);
     else if (message.type === "reconnect") reconnect(ws, message.roomCode, message.token);
+    else if (message.type === "rematch") rematch(ws);
+    else if (message.type === "leave_room") leaveRoom(ws);
     else if (message.type === "action") handleAction(ws, message).catch(error => {
       console.error(error);
       sendJson(ws, { type: "error", error: "伺服器處理操作時發生錯誤" });

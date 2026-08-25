@@ -27,6 +27,9 @@ function client(url) {
     ws,
     open: () => new Promise((resolve, reject) => { ws.once("open", resolve); ws.once("error", reject); }),
     send: message => ws.send(JSON.stringify(message)),
+    // 丟掉還沒被消費的舊訊息。跨階段等待時一定要先清，否則 wait() 會
+    // 命中前一階段積下來的 state（例如 gameOver 還是 false 的那些）。
+    drain: () => inbox.splice(0),
     wait(predicate, timeout = 3000) {
       const existing = inbox.findIndex(predicate);
       if (existing >= 0) return Promise.resolve(inbox.splice(existing, 1)[0]);
@@ -200,4 +203,91 @@ test("two sessions synchronize, preserve privacy, reject illegal actions, win, a
   assert.equal(report.finalCardDistribution.P2.total, 25);
   assert.equal(report.cardConservationAudits.every(audit => audit.valid), true);
   p1.ws.close(); p2.ws.close();
+});
+
+test("進行中的對局不准跳槽；結束後可用同一房再來一局；主動離開對手看得到", async t => {
+  const listener = require("node:http").createServer();
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    for (const socket of wss.clients) socket.close();
+    await new Promise(resolve => server.close(resolve));
+    listener.close();
+  });
+  const url = `ws://127.0.0.1:${server.address().port}/ws`;
+  const a = client(url), b = client(url), c = client(url);
+  await Promise.all([a.open(), b.open(), c.open()]);
+
+  a.send({ type: "create_room" });
+  const roomA = (await a.wait(m => m.type === "session")).roomCode;
+  b.send({ type: "join_room", roomCode: roomA });
+  await b.wait(m => m.type === "session");
+  await Promise.all([a.wait(m => m.type === "state" && m.state), b.wait(m => m.type === "state" && m.state)]);
+
+  // ---- 1) 對局進行中不准跳到別的房，也不准另開新房 ----
+  c.send({ type: "create_room" });
+  const roomC = (await c.wait(m => m.type === "session")).roomCode;
+  b.send({ type: "join_room", roomCode: roomC });
+  const jumpError = await b.wait(m => m.type === "error");
+  assert.match(jumpError.error, /進行中的對局/,
+    "對局中跳槽會把對手永久留在「對手已斷線」，必須擋下來");
+  b.send({ type: "create_room" });
+  assert.match((await b.wait(m => m.type === "error")).error, /進行中的對局/);
+  // 已在進行中的對局裡時，連回原房也是同一道守衛先攔（順序正確）
+  b.send({ type: "join_room", roomCode: roomA });
+  assert.match((await b.wait(m => m.type === "error")).error, /進行中的對局/);
+  // 「已經在這個房間」要用還沒開局的房才驗得到：C 是 roomC 的 P1
+  c.send({ type: "join_room", roomCode: roomC });
+  assert.match((await c.wait(m => m.type === "error")).error, /已經在這個房間/);
+  // 座位沒有被動到
+  const stillB = await (async () => { b.send({ type: "rematch" }); return b.wait(m => m.type === "error"); })();
+  assert.match(stillB.error, /尚未結束/, "本局還沒結束就不該能再戰");
+  assert.equal(rooms.get(roomA).players[2].connected, true, "B 仍然坐在原本的房間");
+
+  // ---- 2) 用消極判負快速結束，再測再來一局 ----
+  // 直接讀房間裡的引擎取 turnId 與手牌：客戶端 inbox 可能還積著前面那些
+  // 錯誤測試觸發的舊 state，用它去組 intent 會拿到過期的 turnId。
+  const game = () => rooms.get(roomA).game;
+  for (let round = 1; round <= 3; round++) {
+    for (const [player, pid] of [[a, 1], [b, 2]]) {
+      const engine = game();
+      const accepted = player.wait(m => m.type === "accepted" || m.type === "rejected");
+      player.send({ type: "action", requestId: `q${round}-${pid}`,
+        intent: { kind: "deploy", r: pid === 1 ? 0 : 8, c: round - 1,
+          type: engine.players[pid - 1].hand[0], rank: 1, turnId: engine.turnId } });
+      const reply = await accepted;
+      assert.equal(reply.type, "accepted", `第 ${round} 輪 P${pid} 部署應該成功：${reply.error || ""}`);
+    }
+  }
+  assert.equal(game().gameOver, true, "連續 3 輪零交戰應該判消極雙敗");
+  assert.equal(game().winner, "double_loss");
+
+  // 單方請求不會重開
+  a.drain(); b.drain();
+  const bSees = b.wait(m => m.type === "state" && m.rematch?.opponent === true);
+  a.send({ type: "rematch" });
+  const seen = await bSees;
+  assert.deepEqual(seen.rematch, { self: false, opponent: true }, "對手要看得到請求");
+  assert.equal(game().gameOver, true, "只有一方要求時不得重開");
+
+  // 雙方都要求才重開，而且沿用同一間房與同一組座位
+  a.drain();
+  const fresh = a.wait(m => m.type === "state" && m.state?.gameOver === false);
+  b.send({ type: "rematch" });
+  const restarted = await fresh;
+  assert.equal(restarted.roomCode, roomA, "房號不變");
+  assert.equal(restarted.selfPid, 1, "座位不變");
+  assert.equal(restarted.state.roundNo, 1);
+  assert.equal(restarted.state.board.flat().filter(Boolean).length, 0, "棋盤清空");
+  assert.deepEqual(restarted.rematch, { self: false, opponent: false }, "重開後意願要清掉");
+  // 舊局的 requestId 不可以沿用舊回應
+  assert.equal(rooms.get(roomA).players[1].processedRequests.size, 0);
+
+  // ---- 3) 主動離開：對手要能分辨「離開」與「暫時斷線」 ----
+  a.drain(); b.drain();
+  b.send({ type: "leave_room" });
+  await b.wait(m => m.type === "left");
+  const abandoned = await a.wait(m => m.type === "state" && m.status === "opponent_left");
+  assert.equal(abandoned.status, "opponent_left");
+  assert.equal(rooms.get(roomA).players[2], null, "座位要真的空出來");
+  a.ws.close(); b.ws.close(); c.ws.close();
 });

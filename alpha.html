@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>五連戰線｜遠端真人 Alpha</title>
   <link rel="icon" href="/icon-192.png">
-  <link rel="stylesheet" href="/alpha_board.css?v=13">
-  <link rel="stylesheet" href="/game_shell.css?v=13">
-  <link rel="stylesheet" href="/local_layout.css?v=13">
+  <link rel="stylesheet" href="/alpha_board.css?v=14">
+  <link rel="stylesheet" href="/game_shell.css?v=14">
+  <link rel="stylesheet" href="/local_layout.css?v=14">
   <style>
     /* 只保留連線專屬的樣式；版面一律沿用與單機相同的 game_shell + local_layout。 */
     .lobby { display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; }
@@ -32,6 +32,8 @@
       <input id="roomInput" maxlength="6" placeholder="房號">
       <button id="joinBtn" class="btn" disabled>加入房間</button>
       <button id="copyRoomBtn" class="btn hidden" type="button">複製房號</button>
+      <button id="rematchBtn" class="btn hidden" type="button">再來一局</button>
+      <button id="leaveRoomBtn" class="btn hidden" type="button">離開房間</button>
     </span>
     <strong id="roomIdentity"></strong>
     <button id="backToEntryBtn" class="btn" type="button">← 模式選擇</button>
