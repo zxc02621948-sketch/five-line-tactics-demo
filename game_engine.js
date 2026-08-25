@@ -98,6 +98,7 @@ class GameEngine {
     this.deploymentCommitted = false;
     this.gameOver = false;
     this.winner = null;
+    this.endReason = null;
     this.overtime = false;
     this.overtimeStartRound = null;
     this.quietRounds = 0;
@@ -323,6 +324,60 @@ class GameEngine {
 
   hasEmptyCell() {
     return this.board.some(row => row.some(unit => !unit));
+  }
+
+  // 在下一次自己的回合開始時，這名玩家是否能取得至少一張可部署的牌。
+  // 手牌與牌庫可直接使用；冷卻只計入下一次 ownerTurnStart 會歸零的牌。
+  canDeployOnNextOwnTurn(pid) {
+    if (!this.hasEmptyCell()) return false;
+    const player = this.players[pid - 1];
+    return player.hand.length > 0
+      || player.deck.length > 0
+      || player.cooldown.some(item => item.turns <= 1);
+  }
+
+  concludeNoDeployment({ betweenRounds, roundResolved }) {
+    let winner = null;
+    let endReason = null;
+    let text = "";
+    let data = null;
+
+    if (!this.hasEmptyCell()) {
+      winner = "draw";
+      endReason = "board_full";
+      text = "棋盤已滿，雙方都無法再部署：本局平手。";
+    } else if (betweenRounds) {
+      const available = {
+        1: this.canDeployOnNextOwnTurn(1),
+        2: this.canDeployOnNextOwnTurn(2),
+      };
+      data = { available };
+      if (available[1] && available[2]) return null;
+      if (!available[1] && !available[2]) {
+        winner = "draw";
+        endReason = "supply_exhausted_both";
+        text = "雙方下一回合都無兵可部署：補給同時耗盡，本局平手。";
+      } else {
+        winner = available[1] ? 1 : 2;
+        endReason = "opponent_supply_exhausted";
+        text = `P${3 - winner} 下一回合無兵可部署：P${winner} 獲勝。`;
+      }
+    } else {
+      // 回應方已執行 ownerTurnStart；此時仍沒有手牌，就確定無法完成本輪行動。
+      if (this.players[this.current - 1].hand.length > 0) return null;
+      winner = this.current === 1 ? 2 : 1;
+      endReason = "opponent_supply_exhausted";
+      data = { blockedPlayer: this.current };
+      text = `P${this.current} 補牌後仍無兵可部署：P${winner} 獲勝。`;
+    }
+
+    this.gameOver = true;
+    this.winner = winner;
+    this.endReason = endReason;
+    this.endedAt = new Date().toISOString();
+    this.finalFive = { p1: this.fiveLines(1), p2: this.fiveLines(2) };
+    this.addLog("winner", text, { endReason, ...(data || {}) });
+    return { roundResolved, gameOver: true, winner, endReason };
   }
 
   attackTargets(r, c, unit) {
@@ -633,6 +688,8 @@ class GameEngine {
       this.artilleryUsedThisTurn = false;
       this.deploymentCommitted = false;
       this.ownerTurnStart(this.current);
+      const noDeployment = this.concludeNoDeployment({ betweenRounds: false, roundResolved: false });
+      if (noDeployment) return noDeployment;
       this.addLog("sys", `第 ${this.roundNo} 輪換 P${this.current} 行動。`);
       return { roundResolved: false };
     }
@@ -648,6 +705,7 @@ class GameEngine {
     if (this.quietRounds >= PASSIVITY_FORFEIT_ROUNDS) {
       this.gameOver = true;
       this.winner = "double_loss";
+      this.endReason = "passivity_forfeit";
       this.endedAt = new Date().toISOString();
       this.finalFive = { p1: [], p2: [] };
       this.addLog("winner", `雙方連續 ${PASSIVITY_FORFEIT_ROUNDS} 輪未交戰：消極對局，雙方棄賽。`,
@@ -669,6 +727,7 @@ class GameEngine {
       // 恰好單方五連才判勝——加賽階段內外都適用同一條判定。
       this.gameOver = true;
       this.winner = p1Has ? 1 : 2;
+      this.endReason = "five_line";
       this.endedAt = new Date().toISOString();
       this.finalFive = { p1: p1Lines, p2: p2Lines };
       this.addLog("winner", `P${this.winner} 五連獲勝！${this.overtime ? "（加賽）" : ""}`, this.finalFive);
@@ -684,6 +743,11 @@ class GameEngine {
         + `每輪全盤扣最大生命的 ${Math.round(OVERTIME_RULES.decayRate * 100)}%。`,
         { overtimeStartRound: this.roundNo });
     }
+
+    // 五連、消極判負與加賽狀態都處理完後，才判斷下一輪是否仍有合法部署。
+    // 兩邊都沒牌或棋盤已滿時判平手；只有一邊斷糧時由另一邊獲勝。
+    const noDeployment = this.concludeNoDeployment({ betweenRounds: true, roundResolved: true });
+    if (noDeployment) return noDeployment;
 
     this.roundNo++;
     this.actionsThisRound = 0;
@@ -723,6 +787,14 @@ class GameEngine {
     return { perPlayer: 2, radius: 1, center: 30, outer: 12, friendlyFire: true };
   }
 
+  static terminalRules() {
+    return {
+      boardFull: "draw",
+      bothSupplyExhausted: "draw",
+      oneSupplyExhausted: "opponent_wins",
+    };
+  }
+
   visibleStateFor(pid) {
     const own = this.players[pid - 1];
     const opponent = this.players[pid === 1 ? 1 : 0];
@@ -754,6 +826,7 @@ class GameEngine {
       turnOrderMode: this.turnOrderMode,
       unitCatalog: GameEngine.unitCatalog(),
       artilleryRules: GameEngine.artilleryRules(),
+      terminalRules: GameEngine.terminalRules(),
       eliteCardCost: cardCost(2),
       deathCooldownRounds: 3,
       actionsThisRound: this.actionsThisRound,
@@ -761,6 +834,7 @@ class GameEngine {
       deploymentCommitted: this.deploymentCommitted,
       gameOver: this.gameOver,
       winner: this.winner,
+      endReason: this.endReason,
       overtime: this.overtime,
       overtimeRound: this.overtime ? this.roundNo - this.overtimeStartRound : 0,
       overtimeRules: GameEngine.overtimeRules(),
@@ -799,6 +873,7 @@ class GameEngine {
           ...OVERTIME_RULES,
         },
         passivityForfeit: { quietRounds: PASSIVITY_FORFEIT_ROUNDS, result: "double_loss" },
+        noLegalDeployment: GameEngine.terminalRules(),
         eliteAbilities: {
           sword: "斬入：親自擊殺目標後強制移入死亡格，對相鄰最低HP敵人追擊 100% base ATK（套互剋、不套決鬥）",
           shield: "不主動攻擊；相鄰非盾友軍 50% 傷害轉移；對自身實際承受傷害 100% 反震",
@@ -809,6 +884,7 @@ class GameEngine {
       artilleryAnalysis: this.artilleryEvents,
       finalFive: this.finalFive || { p1: [], p2: [] },
       winner: this.winner,
+      endReason: this.endReason,
       finalRound: this.roundNo,
       combatResolutionCount: this.combatResolutionCount,
       remainingArtillery: { P1: this.players[0].artillery, P2: this.players[1].artillery },

@@ -6,7 +6,10 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "test:browser": "node tests/browser_flow.alpha.js",
+    "test:all": "npm test && npm run test:browser",
+    "balance": "node balance_lab.js"
   },
   "dependencies": {
     "ws": "^8.18.3"

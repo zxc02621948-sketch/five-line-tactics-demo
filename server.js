@@ -358,8 +358,12 @@ if (require.main === module) {
   server.listen(PORT, HOST, () => {
     console.log(`五連戰線 Alpha Server: http://localhost:${PORT}`);
     const addresses = [];
-    for (const entries of Object.values(os.networkInterfaces())) for (const entry of entries || []) {
-      if (entry.family === "IPv4" && !entry.internal) addresses.push(entry.address);
+    try {
+      for (const entries of Object.values(os.networkInterfaces())) for (const entry of entries || []) {
+        if (entry.family === "IPv4" && !entry.internal) addresses.push(entry.address);
+      }
+    } catch (error) {
+      console.warn(`無法列出 LAN 位址：${error.message}`);
     }
     for (const address of [...new Set(addresses)]) console.log(`LAN/Tailscale candidate: http://${address}:${PORT}`);
   });

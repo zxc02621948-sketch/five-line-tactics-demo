@@ -682,9 +682,10 @@ test("40 加賽與消極判負的參數只有一份，UI 讀引擎不自己抄",
   assert.equal(state.overtimeRound, 0);
   assert.equal(state.quietRounds, 0);
   assert.equal(state.passivityForfeitRounds, 3);
-  // 兩個客戶端都要認得雙敗，否則會顯示成 "PundefinedT獲勝"
+  // 終局文案由兩端共用的 AlphaUI 處理，避免其中一端顯示成 "Pundefined 獲勝"。
+  assert.match(read("alpha_ui.js"), /view\.winner === "double_loss"/);
   for (const name of ["local_client.js", "alpha_client.js"]) {
-    assert.match(read(name), /double_loss/, `${name} 必須處理雙敗`);
+    assert.match(read(name), /resultLabel/, `${name} 必須使用共用終局文案`);
   }
   // 完整戰報要記錄這兩條規則
   const report = game().fullMatchReport();
@@ -693,4 +694,5 @@ test("40 加賽與消極判負的參數只有一份，UI 讀引擎不自己抄",
   assert.equal(report.rules.overtime.deployDuringOvertime, true);
   assert.equal(report.rules.passivityForfeit.quietRounds, 3);
   assert.equal(report.rules.passivityForfeit.result, "double_loss");
+  assert.deepEqual(report.rules.noLegalDeployment, GameEngine.terminalRules());
 });

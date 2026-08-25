@@ -63,6 +63,20 @@ test("連線對戰有建立房間、複製房號、加入房間、返回模式�
   assert.match(client, /\$\("#backToEntryBtn"\)\.onclick = showEntry/);
 });
 
+test("連線狀態、隱私資訊與終局摘要的 DOM 必須完整且可顯示", () => {
+  assert.match(html, /id="privacyInfo" class="[^"]*hidden[^"]*"/);
+  assert.match(html, /id="matchSummarySection" class="[^"]*hidden[^"]*"[\s\S]*?id="matchSummary"/);
+  assert.doesNotMatch(html, /id="(?:privacyInfo|matchSummary)"[^>]*style="[^"]*display\s*:\s*none/);
+  assert.match(client, /privacyInfo\.classList\.remove\("hidden"\)/);
+  assert.match(client, /summarySection\.classList\.remove\("hidden"\)/);
+  assert.match(client, /summarySection\.classList\.add\("hidden"\)/);
+
+  const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
+  const references = [...client.matchAll(/\$\("#([A-Za-z0-9_-]+)"\)/g)].map(match => match[1]);
+  const missing = [...new Set(references.filter(id => !ids.has(id)))];
+  assert.deepEqual(missing, [], `alpha_client.js 使用了不存在的元素：${missing.join("、")}`);
+});
+
 test("單機與連線都載入同一份 game_engine.js 與共用顯示層", () => {
   for (const [label, page] of [["alpha.html", html], ["index.html", localHtml]]) {
     assert.match(page, /<script src="\/game_engine\.js"><\/script>/, `${label} 缺少 game_engine.js`);
@@ -458,24 +472,22 @@ test("對局進行中隱藏模式切換，但「重開」永遠留著", () => {
   assert.match(localClient, /for \(const id of \["#pveBtn", "#pvpBtn"\]\)/);
   assert.match(localClient, /classList\.toggle\("hidden", inGame\)/);
   assert.match(localClient, /resign\.classList\.toggle\("hidden", !inGame\)/);
-  // 重開不得跟著隱藏：手牌用完時無法部署，但引擎不會判定對局結束，
-  // 跟著藏起來會把玩家鎖死在動不了的局面（實測 6.07% 的對局會走到那裡）
+  // 重開不得跟著隱藏，讓 Alpha 測試者可隨時重新驗證局面。
   assert.doesNotMatch(localClient, /\["#pveBtn", "#pvpBtn", "#resetBtn"\]/,
     "重開不可以跟模式鈕一起隱藏");
   assert.match(localClient, /\$\("#resetBtn"\)\.classList\.remove\("hidden"\)/);
 });
 
-test("無法行動的局面要說明原因並指向重開", () => {
-  // 引擎不會為「手牌用完」判定結束，UI 必須自己認出來
+test("無法部署由正式引擎結束，UI 不再要求玩家手動解死局", () => {
   assert.match(localClient, /const canAct = \(\)[\s\S]{0,160}hand\.length > 0 && engine\.hasEmptyCell\(\)/);
-  assert.match(localClient, /手牌已用完[\s\S]{0,60}無法部署/);
-  assert.match(localClient, /棋盤已滿/);
-  assert.match(localClient, /請按「重開」/);
+  assert.match(localClient, /引擎將依補給耗盡或棋盤已滿規則結束本局/);
+  assert.match(sharedUi, /無法部署時/);
+  assert.match(sharedUi, /雙方補給同時耗盡/);
+  assert.doesNotMatch(localClient, /目前規則沒有這個局面的解法/);
 });
 
-test("引擎確實會留下「不能行動但 gameOver 為 false」的局面", () => {
-  // 這是規則層的洞，不是 UI 的錯；UI 只能保證玩家有出路。
-  // 確定性地掃前 200 個種子，找出第一局走進死局的；一路隨機落子。
+test("引擎不再留下「不能行動但 gameOver 為 false」的局面", () => {
+  // 確定性地掃前 200 個種子；一路隨機落子，任何無法部署都必須已正式終局。
   const playSeed = start => {
     let seed = start >>> 0;
     const rnd = max => { seed = (seed * 1664525 + 1013904223) >>> 0; return Math.floor((seed / 4294967296) * max); };
@@ -483,7 +495,7 @@ test("引擎確實會留下「不能行動但 gameOver 為 false」的局面", (
     let guard = 0;
     while (!engine.gameOver && guard++ < 400) {
       const hand = engine.players[engine.current - 1].hand;
-      if (!hand.length || !engine.hasEmptyCell()) return { engine, stuck: true };
+      if (!hand.length || !engine.hasEmptyCell()) return { engine, stuck: !engine.gameOver };
       const empties = [];
       for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!engine.board[r][c]) empties.push([r, c]);
       const [r, c] = empties[rnd(empties.length)];
@@ -491,16 +503,12 @@ test("引擎確實會留下「不能行動但 gameOver 為 false」的局面", (
     }
     return { engine, stuck: false };
   };
-  let found = null;
-  for (let i = 0; i < 200 && !found; i++) {
+  const stuck = [];
+  for (let i = 0; i < 200; i++) {
     const result = playSeed(1234 + i * 7919);
-    if (result.stuck) found = result;
+    if (result.stuck) stuck.push(result);
   }
-  assert.ok(found, "200 個種子內應該至少有一局走進死局（實測約 6% 的對局會）");
-  const { engine } = found;
-  assert.equal(engine.gameOver, false, "引擎不會為這個局面判定結束");
-  assert.equal(engine.players[engine.current - 1].hand.length === 0 || !engine.hasEmptyCell(), true,
-    "卡住的原因是沒手牌或沒空格");
+  assert.equal(stuck.length, 0, "任何不能部署的局面都必須已有正式終局結果");
 });
 
 test("棄賽會結束對局且不修改引擎規則", () => {

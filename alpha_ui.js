@@ -124,7 +124,7 @@
       <ul>
         <li>每回合雙方各部署 1 顆棋。</li>
         <li>兩人都行動完後，一次結算全場戰鬥。</li>
-        <li>戰鬥順序：主戰鬥　→　★★劍斬入與追擊　→　護衛與反震　→　移除陣亡單位。</li>
+        <li>戰鬥順序：主攻擊與護衛轉移　→　主傷害與移除陣亡　→　★★劍斬入／追擊　→　★★盾反震。</li>
       </ul>
 
       <h3>兵種相剋</h3>
@@ -150,6 +150,13 @@
       <ul>
         <li>單位陣亡後，它綁定的卡會進入 <b>3 回合冷卻</b>，之後回到牌庫重新循環。</li>
         <li>★★ 陣亡時，3 張卡會一起進冷卻。</li>
+      </ul>
+
+      <h3>無法部署時</h3>
+      <ul>
+        <li>只有一方在下一次行動補牌後仍無兵可部署時，判定<b>另一方獲勝</b>。</li>
+        <li>雙方補給同時耗盡，或棋盤已滿、雙方都無法再部署時，判定<b>平手</b>。</li>
+        <li>此判定由正式引擎自動完成，不需要玩家手動重開。</li>
       </ul>
 
       <h3>炮擊</h3>
@@ -420,10 +427,25 @@
     return { text: text.join("　"), full: full.join("；"), level };
   }
 
+  // 單機與連線共用的終局文案；endReason 由權威引擎提供，避免兩端各自猜測。
+  function resultLabel(view) {
+    if (!view || !view.gameOver) return "";
+    if (view.winner === "double_loss") return "消極對局：雙方棄賽";
+    if (view.winner === "draw") {
+      if (view.endReason === "board_full") return "棋盤已滿：本局平手";
+      if (view.endReason === "supply_exhausted_both") return "雙方補給同時耗盡：本局平手";
+      return "本局平手";
+    }
+    if (view.endReason === "opponent_supply_exhausted") {
+      return `P${view.winner} 獲勝（對手無兵可部署）`;
+    }
+    return `P${view.winner} 獲勝`;
+  }
+
   globalThis.AlphaUI = {
     ICONS, NAMES, SHORT_TAG, ELITE_TAG, ABILITY, ELITE_ABILITY,
     handCardHtml, unitHtml, unitTitle, cardDetailHtml, renderCardDetail, rulesHtml, wireRulesOverlay,
     autoSizeBoard, forecast, focusOn, drawForecast, forecastArtillery, drawArtillery,
-    matchPhaseLabel,
+    matchPhaseLabel, resultLabel,
   };
 })();

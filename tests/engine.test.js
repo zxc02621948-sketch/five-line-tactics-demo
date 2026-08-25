@@ -161,3 +161,66 @@ test("death dismantles an elite's three bound cards into cooldown", () => {
   assert.equal(engine.players[0].cooldown.length, 0);
   assert.equal(engine.cardDistribution(1).total, 25);
 });
+
+test("the responding player loses when turn-start draw still leaves no deployable card", () => {
+  const engine = game();
+  engine.players[0].hand = ["sword"];
+  engine.players[0].deck = [];
+  engine.players[0].cooldown = [];
+  engine.players[1].hand = [];
+  engine.players[1].deck = [];
+  engine.players[1].cooldown = [];
+
+  const result = engine.deploy(1, intent(engine, { r: 0, c: 0, type: "sword", rank: 1 }));
+  assert.equal(result.ok, true);
+  assert.equal(engine.gameOver, true);
+  assert.equal(engine.winner, 1);
+  assert.equal(engine.endReason, "opponent_supply_exhausted");
+  assert.equal(engine.visibleStateFor(1).endReason, "opponent_supply_exhausted");
+});
+
+test("between rounds, one exhausted supply loses and simultaneous exhaustion draws", () => {
+  const oneEmpty = game();
+  oneEmpty.players[0].hand = ["sword"];
+  oneEmpty.players[0].deck = [];
+  oneEmpty.players[0].cooldown = [];
+  oneEmpty.players[1].hand = ["shield", "shield"];
+  oneEmpty.players[1].deck = [];
+  oneEmpty.players[1].cooldown = [];
+  oneEmpty.deploy(1, intent(oneEmpty, { r: 0, c: 0, type: "sword", rank: 1 }));
+  oneEmpty.deploy(2, intent(oneEmpty, { r: 8, c: 8, type: "shield", rank: 1 }));
+  assert.equal(oneEmpty.winner, 2);
+  assert.equal(oneEmpty.endReason, "opponent_supply_exhausted");
+
+  const bothEmpty = game();
+  bothEmpty.players[0].hand = ["sword"];
+  bothEmpty.players[0].deck = [];
+  bothEmpty.players[0].cooldown = [];
+  bothEmpty.players[1].hand = ["shield"];
+  bothEmpty.players[1].deck = [];
+  bothEmpty.players[1].cooldown = [];
+  bothEmpty.deploy(1, intent(bothEmpty, { r: 0, c: 0, type: "sword", rank: 1 }));
+  bothEmpty.deploy(2, intent(bothEmpty, { r: 8, c: 8, type: "shield", rank: 1 }));
+  assert.equal(bothEmpty.winner, "draw");
+  assert.equal(bothEmpty.endReason, "supply_exhausted_both");
+  assert.equal(bothEmpty.fullMatchReport().endReason, "supply_exhausted_both");
+});
+
+test("a full board ends as a draw instead of leaving a non-terminal turn", () => {
+  const engine = game();
+  const stats = baseStats("shield", 1);
+  let id = 1;
+  engine.board = Array.from({ length: 9 }, (_, r) => Array.from({ length: 9 }, (_, c) => ({
+    id: id++, pid: (r + c) % 2 + 1, type: "shield", rank: 1, cards: 1,
+    hp: stats.maxHp, maxHp: stats.maxHp, atk: stats.atk,
+  })));
+  const result = engine.concludeNoDeployment({ betweenRounds: true, roundResolved: true });
+  assert.equal(result.gameOver, true);
+  assert.equal(engine.winner, "draw");
+  assert.equal(engine.endReason, "board_full");
+  assert.deepEqual(GameEngine.terminalRules(), {
+    boardFull: "draw",
+    bothSupplyExhausted: "draw",
+    oneSupplyExhausted: "opponent_wins",
+  });
+});

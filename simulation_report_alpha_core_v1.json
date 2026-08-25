@@ -1,0 +1,179 @@
+{
+  "version": "alpha-core-v1-current-engine",
+  "generated_on": "2026-08-25",
+  "game_engine_sha256": "ad8a41a8009bd7022cf3930d5e3fdf5b9e38148576e4003621a27716540de12c",
+  "games_per_leg": 500,
+  "methodology": {
+    "rules_source": "game_engine.js GameEngine（不複製戰鬥或勝負規則）",
+    "seed_policy": "fixed-lcg-mirrored-v1",
+    "ai_limitations": "簡單啟發式 AI；數據只用於版本內比較，不代表真人最佳策略或正式勝率。"
+  },
+  "rules_snapshot": {
+    "board": "9x9",
+    "turn_order": {
+      "turnOrderMode": "fixed",
+      "startingPlayer": 1
+    },
+    "deck": {
+      "sword": 9,
+      "shield": 9,
+      "spear": 7
+    },
+    "unit_catalog": {
+      "sword": {
+        "name": "劍",
+        "counters": "spear",
+        "counteredBy": "shield",
+        "ranks": {
+          "1": {
+            "maxHp": 120,
+            "atk": 24
+          },
+          "2": {
+            "maxHp": 180,
+            "atk": 24,
+            "attacks": true
+          }
+        }
+      },
+      "shield": {
+        "name": "盾",
+        "counters": "sword",
+        "counteredBy": "spear",
+        "ranks": {
+          "1": {
+            "maxHp": 160,
+            "atk": 20
+          },
+          "2": {
+            "maxHp": 240,
+            "atk": 20,
+            "attacks": false
+          }
+        }
+      },
+      "spear": {
+        "name": "槍",
+        "counters": "shield",
+        "counteredBy": "sword",
+        "ranks": {
+          "1": {
+            "maxHp": 120,
+            "atk": 24
+          },
+          "2": {
+            "maxHp": 180,
+            "atk": 24,
+            "attacks": true
+          }
+        }
+      }
+    },
+    "artillery": {
+      "perPlayer": 2,
+      "radius": 1,
+      "center": 30,
+      "outer": 12,
+      "friendlyFire": true
+    },
+    "overtime": {
+      "graceRounds": 3,
+      "decayRate": 0.1,
+      "decayBasis": "maxHp",
+      "passivityForfeitRounds": 3
+    },
+    "no_legal_deployment": {
+      "boardFull": "draw",
+      "bothSupplyExhausted": "draw",
+      "oneSupplyExhausted": "opponent_wins"
+    },
+    "rank3": "disabled"
+  },
+  "baseline_balanced_vs_balanced": {
+    "games": 500,
+    "p1_win_rate": 0.578,
+    "p2_win_rate": 0.422,
+    "draw_rate": 0,
+    "double_loss_rate": 0,
+    "non_terminal_rate": 0,
+    "average_rounds": 8.91,
+    "average_deaths": 5.002,
+    "average_artillery_shots": 3.266,
+    "average_rank2_deployments": 3.086,
+    "card_conservation_valid_rate": 1,
+    "end_reasons": {
+      "five_line": 500
+    }
+  },
+  "mirrored_matchups": {
+    "artillery_vs_no_artillery": {
+      "style_a": "均衡",
+      "style_b": "不用炮擊",
+      "style_a_win_rate": 0.706,
+      "style_b_win_rate": 0.294,
+      "other_result_rate": 0,
+      "aggregate": {
+        "games": 1000,
+        "p1_win_rate": 0.752,
+        "p2_win_rate": 0.248,
+        "draw_rate": 0,
+        "double_loss_rate": 0,
+        "non_terminal_rate": 0,
+        "average_rounds": 7.41,
+        "average_deaths": 3.356,
+        "average_artillery_shots": 1.414,
+        "average_rank2_deployments": 2.654,
+        "card_conservation_valid_rate": 1,
+        "end_reasons": {
+          "five_line": 1000
+        }
+      }
+    },
+    "rank2_vs_no_rank2": {
+      "style_a": "積極合成★★",
+      "style_b": "只部署★",
+      "style_a_win_rate": 0.717,
+      "style_b_win_rate": 0.283,
+      "other_result_rate": 0,
+      "aggregate": {
+        "games": 1000,
+        "p1_win_rate": 0.577,
+        "p2_win_rate": 0.423,
+        "draw_rate": 0,
+        "double_loss_rate": 0,
+        "non_terminal_rate": 0,
+        "average_rounds": 8.611,
+        "average_deaths": 4.715,
+        "average_artillery_shots": 3.24,
+        "average_rank2_deployments": 2.308,
+        "card_conservation_valid_rate": 1,
+        "end_reasons": {
+          "five_line": 1000
+        }
+      }
+    },
+    "spear_preference_vs_shield_preference": {
+      "style_a": "槍偏好",
+      "style_b": "盾偏好",
+      "style_a_win_rate": 0.595,
+      "style_b_win_rate": 0.405,
+      "other_result_rate": 0,
+      "aggregate": {
+        "games": 1000,
+        "p1_win_rate": 0.617,
+        "p2_win_rate": 0.383,
+        "draw_rate": 0,
+        "double_loss_rate": 0,
+        "non_terminal_rate": 0,
+        "average_rounds": 8.789,
+        "average_deaths": 5.321,
+        "average_artillery_shots": 3.436,
+        "average_rank2_deployments": 2.79,
+        "card_conservation_valid_rate": 1,
+        "end_reasons": {
+          "five_line": 1000
+        }
+      }
+    }
+  }
+}
