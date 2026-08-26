@@ -846,3 +846,17 @@ test("階段一：灰色操作直接顯示原因，炮擊原因兩端共用", ()
   }
   assert.match(client, /等待伺服器回應/);
 });
+
+test("階段一：連線操作等待 10 秒會自動解除，收到結果則取消計時", () => {
+  assert.match(client, /const REQUEST_TIMEOUT_MS = 10_000/);
+  assert.match(client, /pendingRequestTimer = setTimeout\([\s\S]*?REQUEST_TIMEOUT_MS\);/);
+  assert.match(client, /伺服器超過 \$\{REQUEST_TIMEOUT_MS \/ 1000\} 秒沒有回傳新狀態，已解除等待，請重試/);
+  assert.match(client, /send\(\{ type: "action"[\s\S]*?schedulePendingRequestTimeout\(\)/,
+    "送出操作後必須開始倒數");
+  assert.match(client, /message\.type === "state"[\s\S]*?clearPendingRequest\(\)/,
+    "收到新狀態必須解除等待並取消計時");
+  assert.match(client, /message\.type === "rejected" \|\| message\.type === "error"[\s\S]*?clearPendingRequest\(\)/,
+    "收到拒絕或錯誤也必須取消計時");
+  assert.match(client, /socket\.addEventListener\("close"[\s\S]*?cancelPendingRequestTimeout\(\)/,
+    "斷線期間不得讓舊計時器誤解鎖");
+});

@@ -9,6 +9,7 @@
   // 必須明確在網址加上 ?turnOrder=alternating 才會啟用，一般入口不會碰到。
   const requestedMode =
     new URLSearchParams(location.search).get("turnOrder") === "alternating" ? "alternating" : "fixed";
+  const REQUEST_TIMEOUT_MS = 10_000;          // 專案擁有者指定：等待伺服器狀態最多 10 秒
   if (requestedMode === "alternating") {
     document.title = "五連戰線｜交替先手（開發測試）";
     $("h1").textContent = "五連戰線｜交替先手（開發測試）";
@@ -27,6 +28,8 @@
   let selectedRank = 1;
   let artilleryMode = false;
   let pendingRequest = false;
+  let pendingRequestTimer = null;
+  let pendingTimedOut = false;
   let notice = "";
   let hoverType = null;                       // 滑鼠正在預覽的兵種
   let resultReportOpen = false;
@@ -54,6 +57,28 @@
     socket.send(JSON.stringify(message));
   }
 
+  function cancelPendingRequestTimeout() {
+    if (pendingRequestTimer !== null) clearTimeout(pendingRequestTimer);
+    pendingRequestTimer = null;
+  }
+
+  function clearPendingRequest() {
+    pendingRequest = false;
+    cancelPendingRequestTimeout();
+  }
+
+  function schedulePendingRequestTimeout() {
+    cancelPendingRequestTimeout();
+    pendingRequestTimer = setTimeout(() => {
+      if (!pendingRequest) return;
+      pendingRequest = false;
+      pendingRequestTimer = null;
+      pendingTimedOut = true;
+      notice = `伺服器超過 ${REQUEST_TIMEOUT_MS / 1000} 秒沒有回傳新狀態，已解除等待，請重試。`;
+      render();
+    }, REQUEST_TIMEOUT_MS);
+  }
+
   function connect() {
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     socket = new WebSocket(`${protocol}//${location.host}/ws`);
@@ -62,10 +87,13 @@
       notice = "";
       const saved = loadSession();
       if (saved?.roomCode && saved?.token) send({ type: "reconnect", roomCode: saved.roomCode, token: saved.token });
+      if (pendingRequest) schedulePendingRequestTimeout();
       render();
     });
     socket.addEventListener("close", () => {
       connected = false;
+      // 斷線期間不倒數；重連後若仍在等待，再重新給完整 10 秒。
+      cancelPendingRequestTimeout();
       notice = "與伺服器斷線，正在嘗試重新連線…";
       render();
       setTimeout(connect, 1800);
@@ -85,13 +113,16 @@
         roomStatus = message.status;
         state = message.state;
         rematchState = message.rematch || { self: false, opponent: false };
-        pendingRequest = false;
+        clearPendingRequest();
+        if (pendingTimedOut) notice = "";
+        pendingTimedOut = false;
         if (!state?.gameOver) resultReportOpen = false;
         if (!state || state.current !== selfPid || state.turnId !== previousTurnId) {
           selectedType = null; selectedRank = 1; artilleryMode = false; moveFrom = null;
         }
       } else if (message.type === "rejected" || message.type === "error") {
-        pendingRequest = false;
+        clearPendingRequest();
+        pendingTimedOut = false;
         notice = message.error;
       } else if (message.type === "accepted") {
         notice = "";
@@ -99,7 +130,8 @@
         // 主動離開：把本機的房間狀態清乾淨，才不會拿舊房的 state 去比對新的 selfPid
         roomCode = null; selfPid = null; state = null; roomStatus = null;
         opponentConnected = false; rematchState = { self: false, opponent: false };
-        pendingRequest = false; artilleryMode = false; selectedType = null;
+        clearPendingRequest(); pendingTimedOut = false;
+        artilleryMode = false; selectedType = null;
         resultReportOpen = false;
         localStorage.removeItem(sessionKey());
         notice = "已離開房間。";
@@ -166,7 +198,9 @@
     if (!ownTurn()) return;
     const requestId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
     pendingRequest = true;
+    pendingTimedOut = false;
     send({ type: "action", requestId, intent: { ...intent, turnId: state.turnId } });
+    schedulePendingRequestTimeout();
     render();
   }
 
