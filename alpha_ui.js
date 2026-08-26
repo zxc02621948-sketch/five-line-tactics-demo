@@ -351,6 +351,273 @@
     }
   }
 
+  // ---- 正式戰鬥演出 ----
+  // 只播放引擎送來的 lastCombat；這裡不重新計算傷害、護衛、斬入或反震。
+  function hasCombatPlayback(cue) {
+    return Boolean(cue && ((cue.packets || []).length || (cue.damage || []).length
+      || (cue.cleaves || []).length || (cue.reflections || []).length));
+  }
+
+  function createCombatPlayback({ boardEl, stageEl, svgEl, piecesEl, labelEl, skipButton, onFinish }) {
+    if (!boardEl || !stageEl || !svgEl || !piecesEl || !labelEl || !skipButton) {
+      return { play: () => false, skip() {}, reset() {}, active: () => false };
+    }
+
+    let timer = null;
+    let running = false;
+    let cue = null;
+    let hiddenUnits = [];
+    const deathPieces = new Map();
+    const cleavePieces = new Map();
+
+    function align() {
+      const size = boardEl.clientWidth;
+      if (!size) return;
+      const rect = boardEl.getBoundingClientRect();
+      const wrap = stageEl.parentElement.getBoundingClientRect();
+      stageEl.style.left = `${rect.left - wrap.left + boardEl.clientLeft}px`;
+      stageEl.style.top = `${rect.top - wrap.top + boardEl.clientTop}px`;
+      stageEl.style.width = `${size}px`;
+      stageEl.style.height = `${size}px`;
+      svgEl.setAttribute("viewBox", `0 0 ${size} ${size}`);
+    }
+
+    const center = point => {
+      const cell = boardEl.clientWidth / 9;
+      return [point.c * cell + cell / 2, point.r * cell + cell / 2];
+    };
+
+    function svgNode(tag, attrs) {
+      const node = document.createElementNS(SVG_NS, tag);
+      for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+      svgEl.appendChild(node);
+      return node;
+    }
+
+    function arrow(from, to, className) {
+      const [x1, y1] = center(from);
+      const [x2, y2] = center(to);
+      const dx = x2 - x1, dy = y2 - y1;
+      const len = Math.hypot(dx, dy) || 1;
+      const inset = boardEl.clientWidth / 9 * 0.3;
+      const sx = x1 + dx / len * inset, sy = y1 + dy / len * inset;
+      const ex = x2 - dx / len * inset, ey = y2 - dy / len * inset;
+      svgNode("line", { x1: sx, y1: sy, x2: ex, y2: ey, class: `combatArrow ${className}` });
+      svgNode("polygon", {
+        class: `combatArrowHead ${className}`,
+        points: "0,-4 10,0 0,4",
+        transform: `translate(${ex} ${ey}) rotate(${Math.atan2(dy, dx) * 180 / Math.PI})`,
+      });
+    }
+
+    function line(from, to, className) {
+      const [x1, y1] = center(from);
+      const [x2, y2] = center(to);
+      svgNode("line", { x1, y1, x2, y2, class: className });
+    }
+
+    function place(node, point) {
+      node.style.left = `${(point.c + 0.5) / 9 * 100}%`;
+      node.style.top = `${(point.r + 0.5) / 9 * 100}%`;
+    }
+
+    function makePiece(unit, point, extraClass = "") {
+      const piece = document.createElement("div");
+      piece.className = `combatPiece p${unit.pid} ${extraClass}`.trim();
+      piece.dataset.unitId = String(unit.id ?? unit.unitId ?? "");
+      const stars = document.createElement("span");
+      stars.className = "combatPieceStars";
+      stars.textContent = "★".repeat(unit.rank || 1);
+      const icon = document.createElement("span");
+      icon.className = "combatPieceIcon";
+      icon.textContent = ICONS[unit.type] || "●";
+      piece.append(stars, icon);
+      place(piece, point);
+      piecesEl.appendChild(piece);
+      return piece;
+    }
+
+    function effect(text, point, className) {
+      const node = document.createElement("div");
+      node.className = `combatEffect ${className}`;
+      node.textContent = text;
+      place(node, point);
+      piecesEl.appendChild(node);
+      return node;
+    }
+
+    function clearEffects() {
+      svgEl.innerHTML = "";
+      for (const node of piecesEl.querySelectorAll(".combatEffect")) node.remove();
+    }
+
+    function hideFinalCleaveUnits() {
+      const ids = new Set((cue.cleaves || []).map(item => String(item.unitId)));
+      hiddenUnits = [...boardEl.querySelectorAll("[data-unit-id]")]
+        .filter(node => ids.has(node.dataset.unitId));
+      for (const node of hiddenUnits) node.classList.add("combatUnitHidden");
+    }
+
+    function preparePieces() {
+      piecesEl.innerHTML = "";
+      deathPieces.clear();
+      cleavePieces.clear();
+      hideFinalCleaveUnits();
+      const cleaveIds = new Set((cue.cleaves || []).map(item => String(item.unitId)));
+      for (const death of cue.deaths || []) {
+        if (cleaveIds.has(String(death.unit.id))) continue;
+        const piece = makePiece(death.unit, death, "combatDeathPiece");
+        piece.dataset.deathPhase = death.phase || "main";
+        deathPieces.set(String(death.unit.id), piece);
+      }
+      for (const cleave of cue.cleaves || []) {
+        const piece = makePiece({
+          id: cleave.unitId, pid: cleave.pid, type: cleave.type, rank: cleave.rank,
+        }, cleave.from, "combatCleavePiece");
+        const laterDeath = (cue.deaths || []).find(item => String(item.unit.id) === String(cleave.unitId));
+        if (laterDeath) {
+          piece.classList.add("combatDeathPiece");
+          piece.dataset.deathPhase = laterDeath.phase || "reflection";
+          deathPieces.set(String(cleave.unitId), piece);
+        }
+        cleavePieces.set(String(cleave.unitId), piece);
+      }
+    }
+
+    function fadeDeaths(phase) {
+      for (const piece of deathPieces.values()) {
+        if (piece.dataset.deathPhase === phase) piece.classList.add("combatDeathFading");
+      }
+    }
+
+    function renderAttack() {
+      clearEffects();
+      for (const packet of cue.packets || []) arrow(packet.from, packet.to, `p${packet.from.pid}`);
+      for (const [targetKey, guards] of Object.entries(cue.guards || {})) {
+        const [r, c] = targetKey.split(",").map(Number);
+        for (const guard of guards) line({ r, c }, guard, "combatGuardLine");
+      }
+    }
+
+    function renderDamage() {
+      clearEffects();
+      for (const hit of cue.damage || []) {
+        effect(`-${hit.damage}`, hit, `combatDamage p${hit.pid}`);
+        effect("", hit, "combatImpact");
+      }
+      fadeDeaths("main");
+    }
+
+    function renderCleave() {
+      clearEffects();
+      const cell = boardEl.clientWidth / 9;
+      for (const item of cue.cleaves || []) {
+        line(item.from, item.to, "combatCleavePath");
+        const piece = cleavePieces.get(String(item.unitId));
+        if (piece) {
+          piece.style.setProperty("--combat-dx", `${(item.to.c - item.from.c) * cell}px`);
+          piece.style.setProperty("--combat-dy", `${(item.to.r - item.from.r) * cell}px`);
+          piece.classList.add("combatCleaveMoving");
+        }
+        if (item.followUp) {
+          arrow(item.to, item.followUp, `cleave p${item.pid}`);
+          effect(`-${item.followUp.damage}`, item.followUp, `combatDamage cleave p${item.pid}`);
+        }
+      }
+      fadeDeaths("cleave");
+    }
+
+    function finishCleave() {
+      for (const item of cue?.cleaves || []) {
+        const piece = cleavePieces.get(String(item.unitId));
+        if (!piece) continue;
+        if (deathPieces.get(String(item.unitId)) === piece) {
+          piece.classList.remove("combatCleaveMoving");
+          piece.style.removeProperty("--combat-dx");
+          piece.style.removeProperty("--combat-dy");
+          place(piece, item.to);
+        } else piece.remove();
+      }
+      cleavePieces.clear();
+      for (const node of hiddenUnits) node.classList.remove("combatUnitHidden");
+      hiddenUnits = [];
+    }
+
+    function renderReflection() {
+      finishCleave();
+      clearEffects();
+      for (const item of cue.reflections || []) {
+        if (item.from) arrow(item.from, item, "reflection");
+        effect(`-${item.damage}`, item, "combatDamage reflection");
+      }
+      fadeDeaths("reflection");
+    }
+
+    function cleanup(notify) {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      finishCleave();
+      svgEl.innerHTML = "";
+      piecesEl.innerHTML = "";
+      deathPieces.clear();
+      stageEl.classList.add("hidden");
+      labelEl.textContent = "";
+      running = false;
+      const finishedCue = cue;
+      cue = null;
+      if (notify && typeof onFinish === "function") onFinish(finishedCue);
+    }
+
+    function play(nextCue) {
+      if (!hasCombatPlayback(nextCue)) return false;
+      if (running) cleanup(false);
+      cue = nextCue;
+      running = true;
+      align();
+      preparePieces();
+      stageEl.classList.remove("hidden");
+
+      const steps = [
+        { label: "主攻擊｜護衛轉移", duration: 820, render: renderAttack },
+        { label: "傷害與陣亡", duration: 880, render: renderDamage },
+      ];
+      if ((cue.cleaves || []).length) {
+        steps.push({ label: "★★劍斬入｜追擊", duration: 920, render: renderCleave, after: finishCleave });
+      }
+      if ((cue.reflections || []).length) {
+        steps.push({ label: "★★盾反震", duration: 820, render: renderReflection });
+      }
+
+      let index = 0;
+      const next = () => {
+        if (!running) return;
+        if (index >= steps.length) { cleanup(true); return; }
+        const step = steps[index++];
+        labelEl.textContent = `第 ${cue.round} 輪｜${step.label}`;
+        step.render();
+        timer = setTimeout(() => {
+          timer = null;
+          if (step.after) step.after();
+          next();
+        }, step.duration);
+      };
+      next();
+      return true;
+    }
+
+    function skip() {
+      if (running) cleanup(true);
+    }
+
+    function reset() {
+      cleanup(false);
+    }
+
+    skipButton.onclick = skip;
+    globalThis.addEventListener("resize", () => { if (running) align(); });
+    return { play, skip, reset, active: () => running };
+  }
+
   // 大卡詳情：沒有目標時整張卡隱藏（.idle），有目標才浮出。
   // 因為 .cardDetail 是 absolute，出現與消失都不會推擠版面。
   function renderCardDetail(box, type, catalog) {
@@ -491,6 +758,7 @@
     ICONS, NAMES, SHORT_TAG, ELITE_TAG, ABILITY, ELITE_ABILITY,
     handCardHtml, unitHtml, unitTitle, cardDetailHtml, renderCardDetail, rulesHtml, wireRulesOverlay,
     autoSizeBoard, forecast, focusOn, drawForecast, forecastArtillery, drawArtillery,
+    hasCombatPlayback, createCombatPlayback,
     matchPhaseLabel, resultLabel, resultReasonLabel, finalFiveOwner,
     artilleryDisabledReason, rankDisabledReason,
   };

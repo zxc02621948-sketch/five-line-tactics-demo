@@ -22,16 +22,19 @@
   let resigned = null;                 // 棄賽者的 pid；棄賽只影響本機顯示，不動引擎規則
   let resultReportOpen = false;
   let resultOverlayDismissed = false;
+  let lastCombatId = null;
+  let pendingCombat = null;
 
   const catalog = () => GameEngine.unitCatalog();
   const finished = () => Boolean(resigned) || (engine && engine.gameOver);
   // 對局已開始 ＝ 盤面上有棋子。開始後就不該還能自由切換模式。
   const started = () => Boolean(engine) && engine.board.some(row => row.some(Boolean));
-  const humanTurn = () => engine && !finished() && !aiThinking
+  const humanTurn = () => engine && !finished() && !aiThinking && !pendingCombat && !combatPlayback.active()
     && (mode === "pvp" || engine.current === 1);
   function turnBlockReason() {
     if (!engine) return "等待遊戲建立";
     if (finished()) return "本局已結束";
+    if (pendingCombat || combatPlayback.active()) return "戰鬥演出中";
     if (aiThinking || (mode === "pve" && engine.current === 2)) return "電腦正在行動";
     return "";
   }
@@ -56,6 +59,7 @@
     selectedType = null; selectedRank = 1; hoverType = null;
     artilleryMode = false; moveFrom = null; notice = ""; aiThinking = false; resigned = null;
     resultReportOpen = false; resultOverlayDismissed = false;
+    combatPlayback.reset(); lastCombatId = null; pendingCombat = null;
     render();
     scheduleAi();
   }
@@ -63,6 +67,29 @@
   // ---- 顯示 ----
   // 每次重繪都依當下容器重算棋盤尺寸，不倚賴 ResizeObserver 的觸發時機
   const sizeBoard = UI.autoSizeBoard(document.querySelector("#board"), document.querySelector(".boardWrap"));
+  const combatPlayback = UI.createCombatPlayback({
+    boardEl: $("#board"),
+    stageEl: $("#combatStage"),
+    svgEl: $("#combatLayer"),
+    piecesEl: $("#combatPieces"),
+    labelEl: $("#combatStepLabel"),
+    skipButton: $("#skipCombatBtn"),
+    onFinish: () => render(),
+  });
+
+  function syncCombatCue() {
+    const next = engine?.lastCombatPresentation();
+    if (!next || next.id === lastCombatId || next.id === pendingCombat?.id) return;
+    pendingCombat = next;
+  }
+
+  function startPendingCombat() {
+    if (!pendingCombat || combatPlayback.active()) return;
+    const next = pendingCombat;
+    pendingCombat = null;
+    lastCombatId = next.id;
+    if (!combatPlayback.play(next)) renderResultOverlay();
+  }
 
   function renderBoard() {
     sizeBoard();
@@ -77,6 +104,7 @@
       if (unit) {
         const div = document.createElement("div");
         div.className = `unit p${unit.pid}`;
+        div.dataset.unitId = String(unit.id);
         div.innerHTML = UI.unitHtml(unit);
         div.title = UI.unitTitle(unit);
         cell.appendChild(div);
@@ -152,6 +180,7 @@
     const boardEl = $("#board");
     if (!layer || !boardEl || !engine) return;
     layer.innerHTML = "";
+    if (pendingCombat || combatPlayback.active()) return;
     if (!hoverCell) {                        // 移開瞄準格時要把統計一起清掉
       if (artilleryPlan) { artilleryPlan = null; updateStatusText(); }
       return;
@@ -232,7 +261,7 @@
 
   function renderResultOverlay() {
     const overlay = $("#resultOverlay");
-    if (!finished() || resultOverlayDismissed) {
+    if (!finished() || resultOverlayDismissed || pendingCombat || combatPlayback.active()) {
       overlay.classList.add("hidden");
       if (!finished()) resultReportOpen = false;
       return;
@@ -263,7 +292,8 @@
 
   function render() {
     if (!engine) return;
-    renderBoard();
+    syncCombatCue();
+    if (!combatPlayback.active()) renderBoard();
     renderHand();
     renderLogs();
     renderForecast();
@@ -303,6 +333,7 @@
     artilleryBtn.className = `btn artBtn ${artilleryMode ? "active" : "ready"}`;
     renderSessionControls();
     renderResultOverlay();
+    startPendingCombat();
   }
 
   // 狀態文字獨立出來：炮擊瞄準時 renderForecast 會算出命中統計，需要單獨刷新。

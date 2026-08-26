@@ -515,15 +515,16 @@ class GameEngine {
       damageResults.push({ r, c, unitId: unit.id, pid: unit.pid, type: unit.type, damage, actualDamage: actual, hpAfter: unit.hp });
     }
     const deaths = [];
-    this.removeDead("combat", deaths);
+    this.removeDead("combat", deaths, "main");
 
     // ---- 階段 2：★★劍 斬入 ＋ 追擊 ----
     const cleaves = this.resolveCleaves(deaths, applyDamage, rawSources, hpBefore);
-    if (cleaves.length) this.removeDead("combat", deaths);
+    if (cleaves.length) this.removeDead("combat", deaths, "cleave");
 
     // ---- 階段 3：★★盾 100% 反震（不再觸發反震、不再觸發護衛）----
     const reflections = [];
     // ★★盾即使因本次主戰鬥陣亡，已記錄的實際承傷仍照常反震（不丟棄 ledger）。
+    const damagePositionByUnit = new Map(damageResults.map(item => [item.unitId, { r: item.r, c: item.c }]));
     for (const [shieldId, sources] of reflectLedger) {
       for (const [srcId, value] of sources) {
         const pos = this.findUnitById(srcId);
@@ -532,10 +533,14 @@ class GameEngine {
         const damage = Math.round(value);
         if (damage <= 0) continue;
         attacker.hp -= damage;
-        reflections.push({ shieldId, r: pos[0], c: pos[1], unitId: srcId, damage, hpAfter: attacker.hp });
+        reflections.push({
+          shieldId,
+          from: damagePositionByUnit.get(shieldId) || null,
+          r: pos[0], c: pos[1], unitId: srcId, damage, hpAfter: attacker.hp,
+        });
       }
     }
-    if (reflections.length) this.removeDead("combat", deaths);
+    if (reflections.length) this.removeDead("combat", deaths, "reflection");
 
     const result = {
       packets,
@@ -589,7 +594,10 @@ class GameEngine {
         const foe = inBounds(rr, cc) && this.board[rr][cc];
         if (foe && foe.pid !== sword.pid) foes.push([rr, cc, foe]);
       }
-      const entry = { unitId: sword.id, pid: sword.pid, from: { r: sr, c: sc }, to: { r: dest[0], c: dest[1] }, followUp: null };
+      const entry = {
+        unitId: sword.id, pid: sword.pid, type: sword.type, rank: sword.rank,
+        from: { r: sr, c: sc }, to: { r: dest[0], c: dest[1] }, followUp: null,
+      };
       if (foes.length) {
         foes.sort((a, b) => a[2].hp - b[2].hp);     // HP 最低優先，同 HP 用固定方向順序
         const [tr, tc, target] = foes[0];
@@ -606,11 +614,11 @@ class GameEngine {
     return log;
   }
 
-  removeDead(cause, deaths) {
+  removeDead(cause, deaths, phase = cause) {
     for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
       const unit = this.board[r][c];
       if (!unit || unit.hp > 0) continue;
-      const death = { cause, r, c, unit: { ...unit } };
+      const death = { cause, phase, r, c, unit: { ...unit } };
       deaths.push(death);
       for (let i = 0; i < unit.cards; i++) {
         this.players[unit.pid - 1].cooldown.push({ type: unit.type, turns: 3 });
@@ -802,6 +810,56 @@ class GameEngine {
     return { ...MOVE_RULES, skipWhenNoLegalMove: true };
   }
 
+  // 最近一次戰鬥的純顯示資料。演出只讀引擎已結算的座標、傷害與事件順序，
+  // 不讓前端重新計算互剋、護衛、斬入或反震。
+  lastCombatPresentation() {
+    let record = null;
+    for (let i = this.roundRecords.length - 1; i >= 0; i--) {
+      if (this.roundRecords[i].combat) { record = this.roundRecords[i]; break; }
+    }
+    if (!record) return null;
+    const combat = record.combat;
+    const point = item => ({ r: item.r, c: item.c });
+    const actor = item => ({
+      ...point(item), unitId: item.unitId, pid: item.pid, type: item.type,
+    });
+    return {
+      id: `${this.matchId}:${record.round}`,
+      round: record.round,
+      packets: combat.packets.map(packet => ({
+        from: actor(packet.from),
+        to: actor(packet.to),
+      })),
+      guards: Object.fromEntries(Object.entries(combat.guards || {}).map(([key, guards]) => [
+        key,
+        guards.map(guard => ({ ...point(guard), unitId: guard.unitId })),
+      ])),
+      damage: combat.damage.map(item => ({
+        ...point(item), unitId: item.unitId, pid: item.pid, type: item.type,
+        damage: item.damage, hpAfter: item.hpAfter,
+      })),
+      cleaves: combat.cleaves.map(item => ({
+        unitId: item.unitId, pid: item.pid, type: item.type, rank: item.rank,
+        from: point(item.from), to: point(item.to),
+        followUp: item.followUp ? {
+          ...point(item.followUp), unitId: item.followUp.unitId,
+          damage: item.followUp.damage, hpAfter: item.followUp.hpAfter,
+        } : null,
+      })),
+      reflections: combat.reflections.map(item => ({
+        shieldId: item.shieldId,
+        from: item.from ? point(item.from) : null,
+        ...point(item), unitId: item.unitId, damage: item.damage, hpAfter: item.hpAfter,
+      })),
+      deaths: combat.deaths.map(item => ({
+        cause: item.cause, phase: item.phase, ...point(item),
+        unit: {
+          id: item.unit.id, pid: item.unit.pid, type: item.unit.type, rank: item.unit.rank,
+        },
+      })),
+    };
+  }
+
   visibleStateFor(pid) {
     const own = this.players[pid - 1];
     const opponent = this.players[pid === 1 ? 1 : 0];
@@ -849,6 +907,7 @@ class GameEngine {
       passivityForfeitRounds: PASSIVITY_FORFEIT_ROUNDS,
       logs: this.logs.map(({ index, round, kind, text }) => ({ index, round, kind, text })),
       finalFive: this.gameOver ? this.finalFive : null,
+      lastCombat: this.lastCombatPresentation(),
     };
   }
 

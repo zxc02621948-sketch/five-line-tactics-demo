@@ -37,6 +37,14 @@
       <div class="boardWrap">
         <div id="board" class="board"></div>
         <svg id="forecastLayer" class="forecastLayer" aria-hidden="true"></svg>
+        <div id="combatStage" class="combatStage hidden">
+          <svg id="combatLayer" class="combatLayer" aria-hidden="true"></svg>
+          <div id="combatPieces" class="combatPieces" aria-hidden="true"></div>
+          <div class="combatPlaybackHud">
+            <span id="combatStepLabel" class="combatStepLabel" aria-live="polite"></span>
+            <button id="skipCombatBtn" class="btn skipCombatBtn" type="button">跳過演出</button>
+          </div>
+        </div>
       </div>
       <div class="handPanel">
         <div class="handHeader">

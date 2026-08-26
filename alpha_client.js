@@ -33,6 +33,9 @@
   let notice = "";
   let hoverType = null;                       // 滑鼠正在預覽的兵種
   let resultReportOpen = false;
+  let combatMatchId = null;
+  let lastCombatId = null;
+  let pendingCombat = null;
 
   // 兵種數值一律取自 server 送來的 unitCatalog；尚未進房時退回同一份 game_engine.js
   // 的靜態目錄，兩者是同一個來源，不會漂移。
@@ -133,6 +136,7 @@
         clearPendingRequest(); pendingTimedOut = false;
         artilleryMode = false; selectedType = null;
         resultReportOpen = false;
+        combatPlayback.reset(); combatMatchId = null; lastCombatId = null; pendingCombat = null;
         localStorage.removeItem(sessionKey());
         notice = "已離開房間。";
         $("#entryOverlay").classList.remove("hidden");
@@ -166,6 +170,7 @@
   function turnBlockReason() {
     if (!connected) return "尚未連上伺服器";
     if (!state) return "等待正式遊戲狀態";
+    if (pendingCombat || combatPlayback.active()) return "戰鬥演出中";
     if (pendingRequest) return "等待伺服器回應";
     if (state.gameOver) return "本局已結束";
     if (!opponentConnected) return "對手已斷線";
@@ -226,6 +231,41 @@
 
   // 每次重繪都依當下容器重算棋盤尺寸，不倚賴 ResizeObserver 的觸發時機
   const sizeBoard = UI.autoSizeBoard(document.querySelector("#board"), document.querySelector(".boardWrap"));
+  const combatPlayback = UI.createCombatPlayback({
+    boardEl,
+    stageEl: $("#combatStage"),
+    svgEl: $("#combatLayer"),
+    piecesEl: $("#combatPieces"),
+    labelEl: $("#combatStepLabel"),
+    skipButton: $("#skipCombatBtn"),
+    onFinish: () => render(),
+  });
+
+  function syncCombatCue() {
+    if (!state) {
+      combatPlayback.reset();
+      combatMatchId = null; lastCombatId = null; pendingCombat = null;
+      return;
+    }
+    if (combatMatchId !== state.matchId) {
+      combatPlayback.reset();
+      combatMatchId = state.matchId;
+      lastCombatId = state.lastCombat?.id || null; // 首次進房／重連不重播舊輪次
+      pendingCombat = null;
+      return;
+    }
+    const next = state.lastCombat;
+    if (!next || next.id === lastCombatId || next.id === pendingCombat?.id) return;
+    pendingCombat = next;
+  }
+
+  function startPendingCombat() {
+    if (!pendingCombat || combatPlayback.active()) return;
+    const next = pendingCombat;
+    pendingCombat = null;
+    lastCombatId = next.id;
+    if (!combatPlayback.play(next)) renderResultOverlay();
+  }
 
   function renderBoard() {
     sizeBoard();
@@ -239,6 +279,7 @@
       if (unit) {
         const div = document.createElement("div");
         div.className = `unit p${unit.pid}`;
+        div.dataset.unitId = String(unit.id);
         div.innerHTML = UI.unitHtml(unit);
         div.title = UI.unitTitle(unit);
         cell.appendChild(div);
@@ -311,6 +352,7 @@
     const layer = $("#forecastLayer");
     if (!layer || !boardEl) return;
     layer.innerHTML = "";
+    if (pendingCombat || combatPlayback.active()) return;
     const board = state?.board;
     if (!hoverCell || !board) return;
     const [r, c] = hoverCell;
@@ -382,7 +424,7 @@
 
   function renderResultOverlay() {
     const overlay = $("#resultOverlay");
-    if (!state?.gameOver) {
+    if (!state?.gameOver || pendingCombat || combatPlayback.active()) {
       overlay.classList.add("hidden");
       resultReportOpen = false;
       return;
@@ -414,6 +456,7 @@
   }
 
   function render() {
+    syncCombatCue();
     $("#socketStatus").textContent = connected ? "伺服器已連線" : "伺服器未連線";
     $("#socketStatus").className = `connection ${connected ? "ok" : "bad"}`;
     // 入座後就不再顯示建立／加入：先前可以在對局中跳到別的房，
@@ -460,7 +503,7 @@
     };
     $("#connectionDetail").textContent = `${statusTexts[roomStatus] || statusTexts.none}${notice ? `\n${notice}` : ""}`;
     $("#connectionDetail").className = `combatPreview ${roomStatus === "opponent_disconnected" || !connected ? "bad" : roomStatus === "waiting" ? "wait" : ""}`;
-    renderBoard();
+    if (!combatPlayback.active()) renderBoard();
     renderHand();
     renderLogs();
     renderForecast();
@@ -521,6 +564,7 @@
       summarySection.querySelector("#matchSummary").textContent = `勝負：${UI.resultLabel(state)}\n最終輪數：${state.roundNo}\n你的炮擊輪數：${ownRounds.join("、") || "未使用"}\n剩餘炮擊：P1 ${state.artillery[1]}／P2 ${state.artillery[2]}\n${cardLine("P1 卡片", p1Cards)}\n${cardLine("P2 卡片", p2Cards)}`;
     } else summarySection.classList.add("hidden");
     renderResultOverlay();
+    startPendingCombat();
   }
 
   // ---- 入口：單機 / 連線兩個模式。只是 UI 層，server routing 不動 ----

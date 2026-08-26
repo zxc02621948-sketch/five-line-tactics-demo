@@ -860,3 +860,77 @@ test("階段一：連線操作等待 10 秒會自動解除，收到結果則取�
   assert.match(client, /socket\.addEventListener\("close"[\s\S]*?cancelPendingRequestTimeout\(\)/,
     "斷線期間不得讓舊計時器誤解鎖");
 });
+
+/* ---------------- UX 規格階段二 ---------------- */
+
+test("階段二：引擎提供可播放的權威戰鬥事件，不讓前端重算規則", () => {
+  const reflectEngine = bench();
+  const shield = reflectEngine.put(4, 4, 1, "shield", 2);
+  const spear = reflectEngine.put(4, 5, 2, "spear", 1, 20);
+  const reflectResult = reflectEngine.resolveCombat();
+  reflectEngine.ensureRoundRecord().combat = reflectResult;
+  const reflectCue = reflectEngine.lastCombatPresentation();
+
+  assert.match(reflectCue.id, new RegExp(`:${reflectCue.round}$`));
+  assert.deepEqual(reflectCue.reflections[0].from, { r: 4, c: 4 }, "反震必須帶盾的來源格");
+  assert.equal(reflectCue.reflections[0].shieldId, shield.id);
+  assert.equal(reflectCue.reflections[0].unitId, spear.id);
+  assert.ok(reflectCue.deaths.some(item => item.unit.id === spear.id && item.phase === "reflection"),
+    "反震陣亡必須標示演出階段");
+  assert.deepEqual(reflectEngine.visibleStateFor(1).lastCombat, reflectCue,
+    "連線狀態直接傳送同一份引擎演出資料");
+  assert.deepEqual(Object.keys(reflectCue.deaths[0].unit).sort(), ["id", "pid", "rank", "type"],
+    "演出資料不得夾帶手牌、牌庫或其他隱藏資訊");
+
+  const cleaveEngine = bench();
+  const sword = cleaveEngine.put(4, 4, 1, "sword", 2);
+  const victim = cleaveEngine.put(4, 5, 2, "spear", 1, 10);
+  cleaveEngine.put(4, 6, 2, "spear", 1);
+  const cleaveResult = cleaveEngine.resolveCombat();
+  cleaveEngine.ensureRoundRecord().combat = cleaveResult;
+  const cleaveCue = cleaveEngine.lastCombatPresentation();
+  assert.equal(cleaveCue.cleaves[0].unitId, sword.id);
+  assert.equal(cleaveCue.cleaves[0].type, "sword");
+  assert.equal(cleaveCue.cleaves[0].rank, 2);
+  assert.ok(cleaveCue.deaths.some(item => item.unit.id === victim.id && item.phase === "main"));
+});
+
+test("階段二：兩個入口都有不占版面的棋盤演出層與可點擊跳過按鈕", () => {
+  for (const [name, page] of [["index.html", localHtml], ["alpha.html", html]]) {
+    for (const id of ["combatStage", "combatLayer", "combatPieces", "combatStepLabel", "skipCombatBtn"]) {
+      assert.ok(page.includes(`id="${id}"`), `${name} 缺少 ${id}`);
+    }
+    assert.match(page, /id="skipCombatBtn"[^>]*type="button"[^>]*>跳過演出<\/button>/);
+  }
+  assert.match(css, /\.combatStage\s*\{[^}]*position:\s*absolute[^}]*pointer-events:\s*none/s,
+    "演出層不得推擠版面或攔住棋盤");
+  assert.match(css, /\.skipCombatBtn\s*\{[^}]*pointer-events:\s*auto/s,
+    "跳過按鈕必須能直接點擊，不能只靠 hover");
+  assert.match(css, /@keyframes combatDeathFade/);
+  assert.match(css, /@keyframes combatCleaveMove/);
+  assert.match(css, /\.combatArrow\.reflection/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+});
+
+test("階段二：主攻擊、傷害、斬入、反震依序播放，兩端完成前鎖住操作與終局層", () => {
+  assert.match(sharedUi, /function createCombatPlayback\(/);
+  assert.match(sharedUi, /主攻擊｜護衛轉移[\s\S]*?傷害與陣亡[\s\S]*?★★劍斬入｜追擊[\s\S]*?★★盾反震/,
+    "共用播放器必須維持規格指定的四段順序");
+  assert.match(sharedUi, /skipButton\.onclick = skip/);
+  assert.match(sharedUi, /effect\(`-\$\{hit\.damage\}`/,
+    "傷害數字必須直接讀引擎結果");
+  assert.match(sharedUi, /cue\.guards/);
+  assert.match(sharedUi, /cue\.cleaves/);
+  assert.match(sharedUi, /cue\.reflections/);
+
+  for (const [name, text] of [["local_client.js", localClient], ["alpha_client.js", client]]) {
+    assert.match(text, /UI\.createCombatPlayback\(/, `${name} 必須使用共用播放器`);
+    assert.match(text, /div\.dataset\.unitId = String\(unit\.id\)/,
+      `${name} 必須讓斬入演出能鎖定權威單位`);
+    assert.match(text, /戰鬥演出中/, `${name} 演出期間必須鎖住操作`);
+    assert.match(text, /pendingCombat \|\| combatPlayback\.active\(\)/,
+      `${name} 終局層不得蓋住尚未播完的戰鬥`);
+  }
+  assert.match(client, /state\.lastCombat/);
+  assert.match(localClient, /engine\?\.lastCombatPresentation\(\)/);
+});

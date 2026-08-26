@@ -330,3 +330,182 @@
 .artCell { fill: rgba(255, 212, 59, .12); stroke: #ffd43b; stroke-width: 2; }
 .artCell.foe { fill: rgba(255, 107, 107, .2); stroke: #ff8787; }
 .artCell.ally { fill: rgba(77, 171, 247, .22); stroke: #4dabf7; stroke-dasharray: 5 3; }
+
+/* ---- 階段二：正式戰鬥演出。整層疊在棋盤上，不占版面、不攔棋盤操作。 ---- */
+.combatStage {
+  position: absolute;
+  z-index: 12;
+  overflow: visible;
+  pointer-events: none;
+}
+.combatLayer,
+.combatPieces {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.combatPlaybackHud {
+  position: absolute;
+  z-index: 4;
+  top: 7px;
+  left: 7px;
+  right: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  pointer-events: none;
+}
+.combatStepLabel {
+  min-width: 0;
+  padding: 7px 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .22);
+  border-radius: 999px;
+  background: rgba(8, 12, 18, .88);
+  box-shadow: 0 5px 18px rgba(0, 0, 0, .42);
+  color: #fff;
+  font-size: clamp(11px, 1.4vw, 14px);
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skipCombatBtn {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border-color: #ffd43b;
+  background: rgba(65, 53, 12, .94);
+  color: #fff3bf;
+  font-weight: 900;
+  pointer-events: auto;
+}
+.combatArrow {
+  fill: none;
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-dasharray: 10 6;
+  animation: combatLineFlow .58s linear infinite;
+  filter: drop-shadow(0 0 4px currentColor);
+}
+.combatArrow.p1 { stroke: #ff8787; color: #ff8787; }
+.combatArrow.p2 { stroke: #74c0fc; color: #74c0fc; }
+.combatArrow.cleave { stroke: #ffd43b; color: #ffd43b; }
+.combatArrow.reflection { stroke: #e599f7; color: #e599f7; stroke-dasharray: 4 5; }
+.combatArrowHead.p1 { fill: #ff8787; }
+.combatArrowHead.p2 { fill: #74c0fc; }
+.combatArrowHead.cleave { fill: #ffd43b; }
+.combatArrowHead.reflection { fill: #e599f7; }
+.combatGuardLine {
+  fill: none;
+  stroke: #69db7c;
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-dasharray: 3 5;
+  animation: combatGuardPulse .62s ease-in-out infinite alternate;
+  filter: drop-shadow(0 0 5px #40c057);
+}
+.combatCleavePath {
+  fill: none;
+  stroke: #ffd43b;
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-dasharray: 3 7;
+  filter: drop-shadow(0 0 6px #f59f00);
+}
+.combatPiece {
+  position: absolute;
+  z-index: 2;
+  width: 9.6%;
+  height: 9.6%;
+  transform: translate(-50%, -50%);
+  overflow: hidden;
+  border: clamp(2px, .28vw, 4px) solid;
+  border-radius: 50%;
+  box-sizing: border-box;
+  box-shadow: 0 5px 18px rgba(0, 0, 0, .55);
+}
+.combatPiece.p1 { border-color: #ff8787; background: #71303a; }
+.combatPiece.p2 { border-color: #74c0fc; background: #24517a; }
+.combatPieceStars {
+  position: absolute;
+  top: 6%;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #ffd43b;
+  font-size: clamp(7px, .9vw, 11px);
+  line-height: 1;
+  white-space: nowrap;
+}
+.combatPieceIcon {
+  position: absolute;
+  top: 54%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: clamp(15px, 2.2vw, 31px);
+  line-height: 1;
+}
+.combatUnitHidden { opacity: 0 !important; }
+.combatDeathFading { animation: combatDeathFade .72s ease-in forwards; }
+.combatCleaveMoving {
+  animation: combatCleaveMove .74s cubic-bezier(.2, .8, .2, 1) forwards;
+  filter: drop-shadow(0 0 9px #ffd43b);
+}
+.combatEffect {
+  position: absolute;
+  z-index: 3;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.combatDamage {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(9, 12, 18, .9);
+  color: #fff;
+  font-size: clamp(13px, 2vw, 24px);
+  font-weight: 1000;
+  text-shadow: 0 2px 4px #000;
+  animation: combatDamageFloat .8s ease-out forwards;
+}
+.combatDamage.p1 { border: 1px solid #ff8787; color: #ffc9c9; }
+.combatDamage.p2 { border: 1px solid #74c0fc; color: #d0ebff; }
+.combatDamage.cleave { border-color: #ffd43b; color: #fff3bf; }
+.combatDamage.reflection { border: 1px solid #e599f7; color: #f3d9fa; }
+.combatImpact {
+  width: 8.4%;
+  aspect-ratio: 1;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  animation: combatImpactRing .58s ease-out forwards;
+}
+
+@keyframes combatLineFlow { to { stroke-dashoffset: -16; } }
+@keyframes combatGuardPulse { from { opacity: .45; } to { opacity: 1; } }
+@keyframes combatDamageFloat {
+  0% { opacity: 0; transform: translate(-50%, -12%) scale(.72); }
+  22% { opacity: 1; transform: translate(-50%, -62%) scale(1.08); }
+  100% { opacity: 0; transform: translate(-50%, -150%) scale(.96); }
+}
+@keyframes combatImpactRing {
+  from { opacity: .9; transform: translate(-50%, -50%) scale(.35); }
+  to { opacity: 0; transform: translate(-50%, -50%) scale(1.25); }
+}
+@keyframes combatDeathFade {
+  0% { opacity: 1; transform: translate(-50%, -50%) scale(1); filter: grayscale(0); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(.35); filter: grayscale(1); }
+}
+@keyframes combatCleaveMove {
+  from { transform: translate(-50%, -50%) scale(1); }
+  to { transform: translate(calc(-50% + var(--combat-dx)), calc(-50% + var(--combat-dy))) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .combatArrow,
+  .combatGuardLine,
+  .combatDamage,
+  .combatImpact,
+  .combatDeathFading,
+  .combatCleaveMoving { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+}
