@@ -263,6 +263,54 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: clamp(21px, 1.7vw, 26px);
+  line-height: 28px;
+  letter-spacing: .01em;
+  transition: color .18s ease, text-shadow .18s ease;
+}
+
+/* 「目前回合」本身就是固定槽位的玩家資訊帶；只換色與發光，不改尺寸。 */
+.turnSection {
+  transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease;
+}
+.turnSection.active-p1 {
+  border-color: rgba(255, 107, 107, .9);
+  box-shadow: inset 0 0 0 1px rgba(255, 107, 107, .2), 0 0 22px rgba(255, 107, 107, .2);
+  background: linear-gradient(135deg, rgba(255, 107, 107, .1), #151922 46%);
+}
+.turnSection.active-p2 {
+  border-color: rgba(77, 171, 247, .9);
+  box-shadow: inset 0 0 0 1px rgba(77, 171, 247, .2), 0 0 22px rgba(77, 171, 247, .2);
+  background: linear-gradient(135deg, rgba(77, 171, 247, .1), #151922 46%);
+}
+.turn.p1t { color: var(--p1); text-shadow: 0 0 16px rgba(255, 107, 107, .42); }
+.turn.p2t { color: var(--p2); text-shadow: 0 0 16px rgba(77, 171, 247, .42); }
+
+/* 棋盤外框同步顯示行動方；終局後由 client 清掉這兩個 class。 */
+.board.active-p1 {
+  border-color: var(--p1);
+  box-shadow: 0 0 0 2px rgba(255, 107, 107, .24), 0 16px 42px rgba(0, 0, 0, .24), 0 0 24px rgba(255, 107, 107, .18);
+}
+.board.active-p2 {
+  border-color: var(--p2);
+  box-shadow: 0 0 0 2px rgba(77, 171, 247, .24), 0 16px 42px rgba(0, 0, 0, .24), 0 0 24px rgba(77, 171, 247, .18);
+}
+
+/* 對手／電腦行動時只降低操作區亮度，固定牌架仍完整佔位。 */
+.handPanel.inactive-turn .hand,
+.handPanel.inactive-turn .rankRow {
+  opacity: .38;
+  filter: saturate(.55);
+}
+.hand,
+.rankRow {
+  transition: opacity .18s ease, filter .18s ease;
+}
+
+.btn:disabled,
+.card:disabled {
+  cursor: not-allowed;
+  opacity: .52;
 }
 
 /* 警示條：固定佔位，靠 level class 上色。空字串時完全透明。 */
@@ -296,6 +344,12 @@ body {
 .artilleryStatus,
 .artBtn {
   margin-top: 0;
+}
+
+.artBtn {
+  overflow: hidden;
+  line-height: 1.25;
+  white-space: normal;
 }
 
 .turnSection .note {

@@ -776,3 +776,73 @@ test("移動是替代行動：有牌時不得移動，沒牌沒棋時自動跳�
   assert.equal(engine.canAct(1), false, "此時無法行動，應由引擎自動跳過");
   assert.equal(engine.gameOver, false, "但不判輸");
 });
+
+/* ---------------- UX 規格階段一 ---------------- */
+
+test("階段一：輪到誰有大字、玩家色、資訊帶與棋盤發亮，非自己回合手牌降亮", () => {
+  for (const [name, page] of [["index.html", localHtml], ["alpha.html", html]]) {
+    assert.match(page, /id="turnText" class="turn" aria-live="polite"/, `${name} 的回合大字需可被即時朗讀`);
+  }
+  for (const [name, text] of [["local_client.js", localClient], ["alpha_client.js", client]]) {
+    assert.match(text, /function renderTurnVisual\(\)/, `${name} 必須集中更新回合視覺`);
+    assert.match(text, /active-p\$\{pid\}/, `${name} 必須同步 P1／P2 玩家色`);
+    assert.match(text, /inactive-turn/, `${name} 必須能降低非行動方手牌亮度`);
+  }
+  assert.match(layoutCss, /\.turnSection\.active-p1\s*\{/);
+  assert.match(layoutCss, /\.turnSection\.active-p2\s*\{/);
+  assert.match(layoutCss, /\.board\.active-p1\s*\{/);
+  assert.match(layoutCss, /\.board\.active-p2\s*\{/);
+  assert.match(layoutCss, /\.handPanel\.inactive-turn \.hand/);
+});
+
+test("階段一：終局使用全螢幕覆蓋層並提供再戰、離開與收合戰報", () => {
+  for (const [name, page] of [["index.html", localHtml], ["alpha.html", html]]) {
+    assert.match(page, /id="resultOverlay" class="overlay resultOverlay hidden"/, `${name} 缺少預設隱藏的終局層`);
+    for (const id of ["resultTitle", "resultReason", "resultRematchBtn", "resultLeaveBtn",
+      "resultReportBtn", "resultReport"]) {
+      assert.ok(page.includes(`id="${id}"`), `${name} 缺少 ${id}`);
+    }
+  }
+  assert.match(css, /\.resultOverlay\s*\{[^}]*z-index:\s*60/s);
+  assert.match(css, /\.resultReport\s*\{[^}]*overflow:\s*auto/s);
+  for (const [name, text] of [["local_client.js", localClient], ["alpha_client.js", client]]) {
+    assert.match(text, /function renderResultOverlay\(\)/, `${name} 必須渲染終局層`);
+    assert.match(text, /#resultTitle"\)\.textContent/, `${name} 的結果不得以 innerHTML 寫入`);
+    assert.match(text, /#resultReason"\)\.textContent/, `${name} 的原因不得以 innerHTML 寫入`);
+    assert.match(text, /#resultReportBtn"\)\.onclick/, `${name} 必須能開關戰報`);
+  }
+});
+
+test("階段一：終局原因與致勝五顆直接使用引擎資料", () => {
+  const rules = GameEngine.overtimeRules();
+  assert.equal(AlphaUI.resultReasonLabel({ gameOver: true, winner: 1, endReason: "five_line", overtime: false }),
+    "P1 在戰鬥結算後維持五連；棋盤金框標示致勝五顆。");
+  assert.equal(AlphaUI.resultReasonLabel({ gameOver: true, winner: 2, endReason: "five_line", overtime: true }),
+    "P2 在加賽戰鬥結算後維持五連；棋盤金框標示致勝五顆。");
+  assert.match(AlphaUI.resultReasonLabel({ gameOver: true, winner: "double_loss",
+    endReason: "passivity_forfeit", overtimeRules: rules }), new RegExp(`${rules.passivityForfeitRounds} 輪`));
+
+  const final = { finalFive: { p1: [[{ r: 2, c: 1 }, { r: 2, c: 2 }]], p2: [[{ r: 5, c: 5 }]] } };
+  assert.equal(AlphaUI.finalFiveOwner(final, 2, 2), 1);
+  assert.equal(AlphaUI.finalFiveOwner(final, 5, 5), 2);
+  assert.equal(AlphaUI.finalFiveOwner(final, 0, 0), 0);
+  for (const text of [client, localClient]) assert.match(text, /UI\.finalFiveOwner\(/);
+  assert.match(css, /\.cell\.final-five-p1/);
+  assert.match(css, /\.cell\.final-five-p2/);
+});
+
+test("階段一：灰色操作直接顯示原因，炮擊原因兩端共用", () => {
+  assert.equal(AlphaUI.artilleryDisabledReason({ turnReason: "不是你的回合", remaining: 2 }), "不是你的回合");
+  assert.equal(AlphaUI.artilleryDisabledReason({ remaining: 0 }), "本場炮擊已用完");
+  assert.equal(AlphaUI.artilleryDisabledReason({ remaining: 1, usedThisTurn: true }), "本回合已使用炮擊");
+  assert.equal(AlphaUI.artilleryDisabledReason({ remaining: 1, deploymentCommitted: true }),
+    "已完成部署，炮擊只能在部署前使用");
+  assert.equal(AlphaUI.rankDisabledReason({ count: 2, cost: 3 }), "需要 3 張，目前只有 2 張");
+  for (const [name, text] of [["local_client.js", localClient], ["alpha_client.js", client]]) {
+    assert.match(text, /UI\.artilleryDisabledReason\(/, `${name} 必須使用共用炮擊原因`);
+    assert.match(text, /artilleryBtn\.textContent = disabledReason|artilleryButton\.textContent = disabledReason/,
+      `${name} 必須把原因直接寫在炮擊按鈕上`);
+    assert.match(text, /手牌與炮擊會在可操作時恢復/, `${name} 必須在固定狀態列說明整體停用原因`);
+  }
+  assert.match(client, /等待伺服器回應/);
+});

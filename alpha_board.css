@@ -152,6 +152,95 @@
 .rulesBody th, .rulesBody td { border: 1px solid #343d4d; padding: 5px 8px; text-align: left; }
 .rulesBody th { color: #aab4c3; font-weight: 600; }
 
+/* ---- 終局覆蓋層：固定在版面外，不推擠棋盤；戰報只在覆蓋層內展開 ---- */
+.resultOverlay {
+  z-index: 60;
+  justify-content: flex-end;
+  background: linear-gradient(90deg, rgba(5, 8, 13, .42), rgba(5, 8, 13, .94) 62%);
+  backdrop-filter: saturate(.82);
+}
+.resultBox {
+  width: min(520px, 100%);
+  max-height: calc(100vh - 32px);
+  margin-right: clamp(0px, 2.5vw, 42px);
+  overflow: auto;
+  padding: clamp(24px, 4vw, 42px);
+  text-align: center;
+  border-width: 2px;
+}
+.resultBox.result-p1 {
+  border-color: var(--p1);
+  box-shadow: 0 0 0 1px rgba(255, 107, 107, .22), 0 24px 80px #000c, 0 0 42px rgba(255, 107, 107, .18);
+}
+.resultBox.result-p2 {
+  border-color: var(--p2);
+  box-shadow: 0 0 0 1px rgba(77, 171, 247, .22), 0 24px 80px #000c, 0 0 42px rgba(77, 171, 247, .18);
+}
+.resultBox.result-neutral {
+  border-color: var(--warn);
+  box-shadow: 0 24px 80px #000c, 0 0 42px rgba(255, 212, 59, .16);
+}
+.resultEyebrow {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .22em;
+}
+.resultBox h2 {
+  margin: 0;
+  font-size: clamp(32px, 6vw, 54px);
+  line-height: 1.12;
+}
+.result-p1 h2 { color: var(--p1); }
+.result-p2 h2 { color: var(--p2); }
+.result-neutral h2 { color: var(--warn); }
+.resultReason {
+  min-height: 52px;
+  margin: 16px auto 20px;
+  color: #d7deea;
+  font-size: 16px;
+  line-height: 1.65;
+}
+.resultActions {
+  display: flex;
+  justify-content: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.resultActions .btn { min-width: 122px; }
+.resultPrimary {
+  border-color: var(--good);
+  background: #24452c;
+  color: #d5ffdc;
+}
+.resultReport {
+  height: min(230px, 34vh);
+  margin-top: 18px;
+  overflow: auto;
+  padding: 13px 15px;
+  border: 1px solid #394458;
+  border-radius: 10px;
+  background: #0f151f;
+  color: #cbd5e1;
+  font-size: 13px;
+  line-height: 1.65;
+  text-align: left;
+  white-space: pre-wrap;
+}
+
+/* 只在引擎已宣告終局後標出 finalFive；這不是進行中的連線威脅提示。 */
+.cell.final-five-p1,
+.cell.final-five-p2 {
+  z-index: 1;
+  box-shadow: inset 0 0 0 3px #ffe066, inset 0 0 22px rgba(255, 212, 59, .28);
+}
+.cell.final-five-p1 .unit,
+.cell.final-five-p2 .unit {
+  border-color: #ffe066;
+  box-shadow: 0 0 0 3px rgba(255, 212, 59, .22), 0 0 18px rgba(255, 212, 59, .8);
+}
+
 /* ---- 版面定位：任何面板的內容變化都不得推擠其他區塊 ---- */
 /* 手牌小卡固定尺寸，內容多寡不改變列高 */
 .card {
@@ -210,6 +299,11 @@
     max-width: calc(100vw - 16px);
     height: 260px;
   }
+
+  .resultActions { display: grid; grid-template-columns: 1fr; }
+  .resultActions .btn { width: 100%; }
+  .resultOverlay { justify-content: center; background: rgba(5, 8, 13, .9); }
+  .resultBox { margin-right: 0; }
 }
 
 /* ---- 攻擊指示層：疊在棋盤上的預演。不接受點擊、不參與版面 ---- */

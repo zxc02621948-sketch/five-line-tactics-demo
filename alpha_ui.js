@@ -438,10 +438,60 @@
     return `P${view.winner} 獲勝${view.endReason === "five_line" && view.overtime ? "（加賽）" : ""}`;
   }
 
+  // 終局原因只翻譯引擎已經判定好的 endReason，不在 UI 重新推導勝負。
+  function resultReasonLabel(view) {
+    if (!view || !view.gameOver) return "";
+    if (view.winner === "draw") return "雙方在同一輪完成五連，判定平手。";
+    if (view.endReason === "passivity_forfeit" || view.winner === "double_loss") {
+      const live = liveOvertimeRules();
+      const rounds = view.passivityForfeitRounds
+        ?? view.overtimeRules?.passivityForfeitRounds
+        ?? live?.passivityForfeitRounds;
+      return rounds
+        ? `雙方連續 ${rounds} 輪未發生戰鬥，依規則判雙方棄賽。`
+        : "雙方持續未發生戰鬥，依消極對局規則判雙方棄賽。";
+    }
+    if (view.endReason === "five_line") {
+      return view.overtime
+        ? `P${view.winner} 在加賽戰鬥結算後維持五連；棋盤金框標示致勝五顆。`
+        : `P${view.winner} 在戰鬥結算後維持五連；棋盤金框標示致勝五顆。`;
+    }
+    return "對局已由引擎完成判定。";
+  }
+
+  // finalFive 是引擎送來的致勝線；這裡只把座標轉成棋盤顯示 class。
+  function finalFiveOwner(view, r, c) {
+    const lines = view?.finalFive;
+    if (!lines) return 0;
+    for (const [key, pid] of [["p1", 1], ["p2", 2]]) {
+      for (const line of lines[key] || []) {
+        if (line.some(cell => cell.r === r && cell.c === c)) return pid;
+      }
+    }
+    return 0;
+  }
+
+  // 按鈕停用原因只整理伺服器／引擎已給的狀態，不複製任何規則數值。
+  function artilleryDisabledReason({ turnReason = "", remaining, usedThisTurn, deploymentCommitted }) {
+    if (turnReason) return turnReason;
+    if (remaining <= 0) return "本場炮擊已用完";
+    if (usedThisTurn) return "本回合已使用炮擊";
+    if (deploymentCommitted) return "已完成部署，炮擊只能在部署前使用";
+    return "";
+  }
+
+  function rankDisabledReason({ turnReason = "", count, cost, capped, typeName = "該兵種" }) {
+    if (turnReason) return turnReason;
+    if (capped) return `場上已有★★${typeName}`;
+    if (count < cost) return `需要 ${cost} 張，目前只有 ${count} 張`;
+    return "";
+  }
+
   globalThis.AlphaUI = {
     ICONS, NAMES, SHORT_TAG, ELITE_TAG, ABILITY, ELITE_ABILITY,
     handCardHtml, unitHtml, unitTitle, cardDetailHtml, renderCardDetail, rulesHtml, wireRulesOverlay,
     autoSizeBoard, forecast, focusOn, drawForecast, forecastArtillery, drawArtillery,
-    matchPhaseLabel, resultLabel,
+    matchPhaseLabel, resultLabel, resultReasonLabel, finalFiveOwner,
+    artilleryDisabledReason, rankDisabledReason,
   };
 })();
