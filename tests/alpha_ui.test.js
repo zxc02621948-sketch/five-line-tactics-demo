@@ -16,6 +16,7 @@ const localClient = read("local_client.js");
 const sharedUi = read("alpha_ui.js");
 const shellCss = read("game_shell.css");
 const layoutCss = read("local_layout.css");
+const onlineLayoutCss = read("online_layout.css");
 const server = read("server.js");
 const stripComments = text => text.replace(/^\s*\/\/.*$/gm, "");
 
@@ -37,11 +38,12 @@ function bench() {
 
 /* ---------------- 入口 ---------------- */
 
-test("主要入口同時提供單機與連線兩個選項", () => {
-  assert.match(html, /id="entryOverlay"/);
-  assert.match(html, /id="entryOnlineBtn"[^>]*>[\s\S]*?連線對戰/);
-  assert.match(html, /id="entryLocalBtn"[^>]*href="\/local"[\s\S]*?單機測試/);
+test("連線入口直接進入大廳，並保留單機與規則入口", () => {
+  assert.match(html, /id="lobbyScreen"/);
+  assert.match(html, /id="roomDirectory"[\s\S]*?等待中的房間/);
+  assert.match(html, /class="btn modeLink" href="\/local">🎮 單機測試/);
   assert.match(html, /id="entryHelpBtn"[\s\S]*?規則/);
+  assert.doesNotMatch(html, /id="entryOverlay"/);
   assert.match(server, /\["\/", \["alpha\.html"/);
   assert.match(server, /\["\/local", \["index\.html"/);
 });
@@ -50,26 +52,27 @@ test("兩種模式都不再標示為舊版原型", () => {
   assert.match(localHtml, /class="btn modeLink" href="\/">🌐 連線對戰/);
   assert.doesNotMatch(localHtml, /舊版原型|舊版規則/);
   assert.doesNotMatch(html, /舊版原型|舊版規則/);
-  assert.match(html, /同一套規則引擎/);
+  assert.match(html, /<script src="\/game_engine\.js"><\/script>/);
 });
 
-test("連線對戰有建立房間、複製房號、加入房間、返回模式選擇", () => {
+test("連線大廳有房間列表、建立、房號加入、複製與離開", () => {
+  assert.match(html, /id="roomList"/);
   assert.match(html, /id="createBtn"[\s\S]*?建立房間/);
   assert.match(html, /id="roomInput"/);
   assert.match(html, /id="joinBtn"[\s\S]*?加入房間/);
   assert.match(html, /id="copyRoomBtn"[\s\S]*?複製房號/);
-  assert.match(html, /id="backToEntryBtn"[\s\S]*?模式選擇/);
+  assert.match(html, /id="leaveWaitingBtn"[\s\S]*?離開房間/);
   assert.match(client, /\$\("#copyRoomBtn"\)\.onclick/);
-  assert.match(client, /\$\("#backToEntryBtn"\)\.onclick = showEntry/);
+  assert.match(client, /\$\("#leaveWaitingBtn"\)\.onclick = leaveRoom/);
 });
 
-test("連線狀態、隱私資訊與終局摘要的 DOM 必須完整且可顯示", () => {
-  assert.match(html, /id="privacyInfo" class="[^"]*hidden[^"]*"/);
-  assert.match(html, /id="matchSummarySection" class="[^"]*hidden[^"]*"[\s\S]*?id="matchSummary"/);
-  assert.doesNotMatch(html, /id="(?:privacyInfo|matchSummary)"[^>]*style="[^"]*display\s*:\s*none/);
-  assert.match(client, /privacyInfo\.classList\.remove\("hidden"\)/);
-  assert.match(client, /summarySection\.classList\.remove\("hidden"\)/);
-  assert.match(client, /summarySection\.classList\.add\("hidden"\)/);
+test("大廳、對局與結算畫面分離，所有 client selector 都有對應 DOM", () => {
+  assert.match(html, /id="lobbyScreen"/);
+  assert.match(html, /id="gameScreen" class="[^"]*hidden[^"]*"/);
+  assert.match(html, /id="resultOverlay" class="[^"]*hidden[^"]*"/);
+  assert.match(client, /lobbyScreen"\)\.classList\.toggle\("hidden", inGame\)/);
+  assert.match(client, /gameScreen"\)\.classList\.toggle\("hidden", !inGame\)/);
+  assert.equal((html.match(/id="board"/g) || []).length, 1, "棋盤只存在於對局畫面");
 
   const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
   const references = [...client.matchAll(/\$\("#([A-Za-z0-9_-]+)"\)/g)].map(match => match[1]);
@@ -439,18 +442,22 @@ test("兵種大卡不得被任何祖先裁切", () => {
   assert.doesNotMatch(shellCss, /\.handPanel\{[^}]*overflow:\s*hidden/);
 });
 
-test("單機與連線使用同一組版面樣式與結構", () => {
+test("單機與連線共用棋盤外殼，連線端另有大廳與玩家帶版面", () => {
   for (const [label, page] of [["alpha.html", html], ["index.html", localHtml]]) {
     assert.ok(page.includes('href="/game_shell.css?v='), `${label} 必須載入共用外殼樣式`);
     assert.ok(page.includes('href="/local_layout.css?v='), `${label} 必須載入共用版面`);
-    // 相同的結構槽位
-    for (const marker of ['class="top"', 'class="layout"', 'class="gameCol"', 'class="boardWrap"',
-      'class="handPanel"', 'class="handHeader"', 'id="hand"', 'id="rankRow"',
-      'id="cardDetail"', 'class="side"', 'turnSection', 'previewSection', 'logSection']) {
+    for (const marker of ['class="boardWrap"', 'class="handPanel"', 'class="handHeader"',
+      'id="hand"', 'id="rankRow"', 'id="cardDetail"', 'turnSection', 'logSection']) {
       assert.ok(page.includes(marker), `${label} 缺少共用結構 ${marker}`);
     }
   }
-  for (const route of ["/game_shell.css", "/local_layout.css"]) {
+  assert.ok(html.includes('href="/online_layout.css?v='), "連線端必須載入專用版面");
+  for (const marker of ['id="lobbyScreen"', 'id="roomList"', 'id="opponentBand"', 'id="selfBand"']) {
+    assert.ok(html.includes(marker), `連線端缺少階段三結構 ${marker}`);
+  }
+  assert.match(onlineLayoutCss, /\.onlineGameCol\s*\{[\s\S]*?grid-template-rows:/);
+  assert.match(onlineLayoutCss, /@media \(max-width:\s*680px\)/);
+  for (const route of ["/game_shell.css", "/local_layout.css", "/online_layout.css"]) {
     assert.ok(server.includes(`["${route}"`), `server 缺少 ${route} 路由`);
   }
 });
@@ -933,4 +940,62 @@ test("階段二：主攻擊、傷害、斬入、反震依序播放，兩端完�
   }
   assert.match(client, /state\.lastCombat/);
   assert.match(localClient, /engine\?\.lastCombatPresentation\(\)/);
+});
+
+/* ---------------- UX 規格階段三 ---------------- */
+
+test("階段三：未入座者收即時等待房列表，卡片可直接加入", () => {
+  for (const id of ["roomList", "roomCount", "emptyRooms", "nicknameInput", "roomNameInput",
+    "roomPasswordInput", "directPasswordInput", "passwordOverlay"]) {
+    assert.ok(html.includes(`id="${id}"`), `連線大廳缺少 ${id}`);
+  }
+  assert.match(server, /sendJson\(ws, \{ type: "lobby", rooms: publicLobbyRooms\(\), serverNow: Date\.now\(\) \}\)/);
+  assert.match(server, /if \(!ws\.alphaSession\) sendJson\(ws, message\)/,
+    "大廳廣播只能送給未入座連線");
+  assert.match(server, /if \(room\.game \|\| room\.abandoned[\s\S]*?return null/,
+    "已開始或失效房間不得留在大廳");
+  assert.match(client, /message\.type === "lobby"[\s\S]*?lobbyRooms =/);
+  assert.match(client, /card\.onclick = \(\) => room\.hasPassword[\s\S]*?joinRoom\(room\.code/);
+});
+
+test("階段三：房名與暱稱只作顯示標籤，絕不進 innerHTML", () => {
+  const lobbyRenderer = client.match(/function renderLobbyRooms\(\)[\s\S]*?\n  function renderWaitingRoom/)[0];
+  const waitingRenderer = client.match(/function renderWaitingRoom\(\)[\s\S]*?\n  function setPlayerAvatar/)[0];
+  const playerRenderer = client.match(/function renderPlayerBands\(\)[\s\S]*?\n  function render/)[0];
+  for (const [label, source] of [["房間列表", lobbyRenderer], ["等待房卡", waitingRenderer], ["玩家資訊帶", playerRenderer]]) {
+    assert.match(source, /textContent/, `${label} 必須用 textContent`);
+    assert.doesNotMatch(source, /innerHTML/, `${label} 不得用 innerHTML 插入使用者文字`);
+  }
+  assert.match(server, /function cleanLabel\(value, maxLength/);
+  assert.match(server, /nickname:\s*cleanNickname\(nickname\)/,
+    "暱稱不能取代伺服器 token 的座位身分");
+  assert.match(client, /const NICKNAME_KEY = "five-line-alpha-nickname"/);
+  assert.match(client, /localStorage\.setItem\(NICKNAME_KEY, value\)/);
+});
+
+test("階段三：受保護房間只公開鎖頭，密碼雜湊且有嘗試次數限制", () => {
+  assert.match(server, /hasPassword: Boolean\(room\.password\)/);
+  assert.match(server, /crypto\.scryptSync/);
+  assert.match(server, /const salt = crypto\.randomBytes\(16\)/);
+  assert.match(server, /crypto\.timingSafeEqual/);
+  assert.match(server, /PASSWORD_ATTEMPT_LIMIT/);
+  assert.match(server, /errorCode: "password_required"/);
+  assert.match(server, /errorCode: "password_invalid"/);
+  assert.match(server, /errorCode: "password_rate_limited"/);
+  const lobbyShape = server.match(/function lobbyRoom\(room\)[\s\S]*?\n}/)[0];
+  assert.doesNotMatch(lobbyShape, /token|password:\s*room\.password/,
+    "大廳房卡不得洩漏密碼或重連 token");
+});
+
+test("階段三：手機直向可用且所有重要資訊都不依賴 hover", () => {
+  assert.match(html, /name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/);
+  assert.match(onlineLayoutCss, /@media \(max-width:\s*680px\)[\s\S]*?\.selfBand\.turnSection/);
+  assert.match(onlineLayoutCss, /\.lobbyNotice[\s\S]*?min-height:\s*28px/,
+    "大廳訊息必須保留固定槽位");
+  assert.match(onlineLayoutCss, /\.roomList[\s\S]*?grid-auto-rows:\s*116px/,
+    "房卡更新不得讓清單結構跳動");
+  assert.match(client, /card\.onclick =/,
+    "房卡用點擊加入，不能只靠 hover");
+  assert.match(client, /artilleryButton\.textContent = disabledReason/,
+    "炮擊停用原因直接顯示在按鈕上");
 });

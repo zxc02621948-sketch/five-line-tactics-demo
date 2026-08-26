@@ -3,118 +3,192 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>五連戰線｜遠端真人 Alpha</title>
+  <title>五連戰線｜連線對戰</title>
   <link rel="icon" href="/icon-192.png">
-  <link rel="stylesheet" href="/alpha_board.css?v=16">
-  <link rel="stylesheet" href="/game_shell.css?v=16">
-  <link rel="stylesheet" href="/local_layout.css?v=16">
-  <style>
-    /* 只保留連線專屬的樣式；版面一律沿用與單機相同的 game_shell + local_layout。 */
-    .lobby { display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; }
-    .lobby input {
-      width: 132px; background: #0f141d; color: var(--text);
-      border: 1px solid var(--grid); border-radius: 8px; padding: 7px 9px; text-transform: uppercase;
-    }
-    .connection { font-weight: 700; white-space: nowrap; }
-    .ok { color: var(--good) } .bad { color: var(--danger) } .wait { color: var(--warn) }
-    .btn.art { background: #604d12 }
-    #roomIdentity { white-space: nowrap; font-size: 13px }
-  </style>
+  <link rel="stylesheet" href="/alpha_board.css?v=17">
+  <link rel="stylesheet" href="/game_shell.css?v=17">
+  <link rel="stylesheet" href="/local_layout.css?v=17">
+  <link rel="stylesheet" href="/online_layout.css?v=17">
 </head>
 <body>
-<div class="app">
-  <div class="top">
-    <h1>五連戰線｜連線對戰</h1>
-    <a class="btn modeLink" href="/local">🎮 單機測試</a>
-    <span id="socketStatus" class="connection wait">連線中…</span>
-    <span class="lobby">
-      <button id="createBtn" class="btn" disabled>建立房間</button>
-      <input id="roomInput" maxlength="6" placeholder="房號">
-      <button id="joinBtn" class="btn" disabled>加入房間</button>
-      <button id="copyRoomBtn" class="btn hidden" type="button">複製房號</button>
-      <button id="rematchBtn" class="btn hidden" type="button">再來一局</button>
-      <button id="leaveRoomBtn" class="btn hidden" type="button">離開房間</button>
-    </span>
-    <strong id="roomIdentity"></strong>
-    <button id="backToEntryBtn" class="btn" type="button">← 模式選擇</button>
-    <span class="pill">9×9</span>
-    <span class="pill">25 張循環牌組</span>
-    <span class="pill counterHint" title="盾克劍、劍克槍、槍克盾">
-      相剋　<b>🛡盾</b> → <b>⚔劍</b> → <b>🔱槍</b> → <b>🛡盾</b>
-    </span>
-    <button id="helpBtn" class="btn helpBtn" type="button">？ 規則</button>
-  </div>
+<section id="lobbyScreen" class="lobbyScreen">
+  <header class="lobbyHeader">
+    <div class="lobbyBrand">
+      <h1>五連戰線</h1>
+      <p>挑一間等待中的房，或建立自己的戰局。</p>
+    </div>
+    <div class="lobbyHeaderActions">
+      <span id="socketStatus" class="connection wait">連線中…</span>
+      <a class="btn modeLink" href="/local">🎮 單機測試</a>
+      <button id="entryHelpBtn" class="btn" type="button">？ 規則</button>
+    </div>
+  </header>
 
-  <div class="layout">
-    <div class="gameCol">
-      <div class="boardWrap">
-        <div id="board" class="board"></div>
-        <svg id="forecastLayer" class="forecastLayer" aria-hidden="true"></svg>
-        <div id="combatStage" class="combatStage hidden">
-          <svg id="combatLayer" class="combatLayer" aria-hidden="true"></svg>
-          <div id="combatPieces" class="combatPieces" aria-hidden="true"></div>
-          <div class="combatPlaybackHud">
-            <span id="combatStepLabel" class="combatStepLabel" aria-live="polite"></span>
-            <button id="skipCombatBtn" class="btn skipCombatBtn" type="button">跳過演出</button>
+  <main class="lobbyLayout">
+    <section id="roomDirectory" class="roomDirectory">
+      <div class="lobbySectionHead">
+        <div>
+          <span class="sectionEyebrow">公開大廳</span>
+          <h2>等待中的房間</h2>
+        </div>
+        <span id="roomCount" class="roomCount">0 間</span>
+      </div>
+      <div id="lobbyNotice" class="lobbyNotice" aria-live="polite"></div>
+      <div id="roomList" class="roomList"></div>
+      <div id="emptyRooms" class="emptyRooms">
+        <span class="emptyIcon">⌛</span>
+        <strong>目前沒有等待中的房間</strong>
+        <span>你可以成為第一位開房的人。</span>
+      </div>
+    </section>
+
+    <aside class="lobbyRail">
+      <div id="unseatedPanel" class="lobbyRailStack">
+        <section class="lobbyCard createRoomCard">
+          <span class="sectionEyebrow">建立戰局</span>
+          <h2>開一間新房</h2>
+          <label class="fieldLabel" for="nicknameInput">你的暱稱</label>
+          <input id="nicknameInput" class="lobbyInput" maxlength="16" autocomplete="nickname" placeholder="玩家">
+          <label class="fieldLabel" for="roomNameInput">房名 <span>選填</span></label>
+          <input id="roomNameInput" class="lobbyInput" maxlength="24" placeholder="預設為「暱稱 的房間」">
+          <label class="fieldLabel" for="roomPasswordInput">房間密碼 <span>選填</span></label>
+          <input id="roomPasswordInput" class="lobbyInput" type="password" maxlength="32" autocomplete="new-password" placeholder="不填就是公開房">
+          <button id="createBtn" class="btn primaryLobbyBtn" type="button" disabled>建立房間</button>
+        </section>
+
+        <section class="lobbyCard directJoinCard">
+          <span class="sectionEyebrow">私人加入</span>
+          <h2>用房號直接加入</h2>
+          <div class="directJoinFields">
+            <input id="roomInput" class="lobbyInput roomCodeInput" maxlength="6" autocomplete="off" placeholder="6 碼房號">
+            <input id="directPasswordInput" class="lobbyInput" type="password" maxlength="32" autocomplete="current-password" placeholder="密碼（若有）">
+          </div>
+          <button id="joinBtn" class="btn" type="button" disabled>加入房間</button>
+        </section>
+      </div>
+
+      <section id="seatedRoomPanel" class="lobbyCard seatedRoomPanel hidden">
+        <span class="sectionEyebrow">你的房間</span>
+        <div class="waitingPulse"><span></span>等待對手加入</div>
+        <h2 id="seatedRoomName">等待中的房間</h2>
+        <div id="roomIdentity" class="roomIdentity"></div>
+        <div class="seatStatusRow">
+          <span class="playerAvatar p1Avatar">P1</span>
+          <div>
+            <strong id="seatedCreatorName">玩家</strong>
+            <span>房間建立者</span>
+          </div>
+          <span class="statusDot online" aria-label="已連線"></span>
+        </div>
+        <div class="seatStatusRow">
+          <span class="playerAvatar neutralAvatar">P2</span>
+          <div>
+            <strong id="seatedOpponentName">等待對手</strong>
+            <span id="seatedOpponentStatus">尚未加入</span>
+          </div>
+          <span id="seatedOpponentDot" class="statusDot" aria-label="尚未加入"></span>
+        </div>
+        <div class="seatedActions">
+          <button id="copyRoomBtn" class="btn" type="button">複製房號</button>
+          <button id="leaveWaitingBtn" class="btn danger" type="button">離開房間</button>
+        </div>
+      </section>
+    </aside>
+  </main>
+</section>
+
+<section id="gameScreen" class="gameScreen hidden">
+  <div class="app">
+    <header class="top gameTop">
+      <h1>五連戰線｜連線對戰</h1>
+      <strong id="gameRoomName" class="gameRoomName"></strong>
+      <span id="gameRoomCode" class="pill"></span>
+      <span id="gameSocketStatus" class="connection wait">連線中…</span>
+      <span class="pill">9×9</span>
+      <span class="pill counterHint" title="盾克劍、劍克槍、槍克盾">
+        相剋　<b>🛡盾</b> → <b>⚔劍</b> → <b>🔱槍</b> → <b>🛡盾</b>
+      </span>
+      <button id="helpBtn" class="btn helpBtn" type="button">？ 規則</button>
+      <button id="leaveRoomBtn" class="btn danger" type="button">離開房間</button>
+    </header>
+
+    <div class="layout onlineGameLayout">
+      <div class="gameCol onlineGameCol">
+        <div id="opponentBand" class="playerBand opponentBand">
+          <span id="opponentAvatar" class="playerAvatar neutralAvatar">P?</span>
+          <div class="bandIdentity">
+            <strong id="opponentName">等待對手</strong>
+            <span id="opponentRole">對手</span>
+          </div>
+          <div class="bandStat"><span>手牌</span><strong id="opponentHandCount">—</strong></div>
+          <div class="bandStat"><span>炮擊</span><strong id="opponentArtillery">—</strong></div>
+          <div class="bandConnection"><span id="opponentStatusDot" class="statusDot"></span><span id="opponentConnectionText">未連線</span></div>
+        </div>
+
+        <div class="boardWrap">
+          <div id="board" class="board"></div>
+          <svg id="forecastLayer" class="forecastLayer" aria-hidden="true"></svg>
+          <div id="combatStage" class="combatStage hidden">
+            <svg id="combatLayer" class="combatLayer" aria-hidden="true"></svg>
+            <div id="combatPieces" class="combatPieces" aria-hidden="true"></div>
+            <div class="combatPlaybackHud">
+              <span id="combatStepLabel" class="combatStepLabel" aria-live="polite"></span>
+              <button id="skipCombatBtn" class="btn skipCombatBtn" type="button">跳過演出</button>
+            </div>
           </div>
         </div>
-      </div>
-      <div class="handPanel">
-        <div class="handHeader">
-          <strong id="handTitle">等待加入房間</strong>
-          <span class="meta" id="deckInfo"></span>
-          <span class="handHint">滑鼠移到手牌（或點選）可看兵種大卡</span>
+
+        <div id="selfBand" class="playerBand selfBand turnSection">
+          <span id="selfAvatar" class="playerAvatar neutralAvatar">P?</span>
+          <div class="bandIdentity">
+            <strong id="selfName">你</strong>
+            <span id="selfRole">玩家</span>
+          </div>
+          <div class="bandTurn">
+            <div id="turnText" class="turn" aria-live="polite"></div>
+            <div id="phaseBadge" class="phaseBadge"></div>
+          </div>
+          <div id="turnStatus" class="status actionStatus bandActionStatus"></div>
+          <div class="selfResources">
+            <div class="bandStat"><span>手牌</span><strong id="selfHandCount">—</strong></div>
+            <div class="bandStat"><span>炮擊</span><strong id="selfArtillery">—</strong></div>
+          </div>
+          <button id="artilleryBtn" class="btn artBtn ready" disabled>炮擊</button>
         </div>
-        <div id="hand" class="hand"></div>
-        <div id="rankRow" class="rankRow"></div>
-        <div id="cardDetail" class="cardDetail idle"></div>
-      </div>
-    </div>
 
-    <div class="side">
-      <div class="section turnSection">
-        <h3>目前回合</h3>
-        <div id="turnText" class="turn" aria-live="polite"></div>
-        <div id="phaseBadge" class="phaseBadge"></div>
-        <div id="turnStatus" class="status actionStatus"></div>
-        <div id="artilleryOverview" class="status artilleryStatus">炮擊資源｜P1：2｜P2：2</div>
-        <button id="artilleryBtn" class="btn artBtn ready" disabled>炮擊</button>
-        <div class="note">炮擊是部署前的額外戰術行動，每回合最多 1 次；炮擊後仍必須正常部署。3×3 範圍敵我皆傷：中心 30、外圈 12。</div>
-      </div>
-
-      <div class="section previewSection">
-        <h3>房間狀態</h3>
-        <div id="connectionDetail" class="combatPreview">尚未建立或加入房間。</div>
-        <div id="privacyInfo" class="combatPreview hidden"></div>
-        <div id="matchSummarySection" class="matchSummarySection hidden">
-          <h3>終局摘要</h3>
-          <div id="matchSummary" class="combatPreview"></div>
+        <div class="handPanel">
+          <div class="handHeader">
+            <strong id="handTitle">等待房間開始</strong>
+            <span class="meta" id="deckInfo"></span>
+            <span class="handHint">滑鼠移到手牌（或點選）可看兵種大卡</span>
+          </div>
+          <div id="hand" class="hand"></div>
+          <div id="rankRow" class="rankRow"></div>
+          <div id="cardDetail" class="cardDetail idle"></div>
         </div>
       </div>
 
-      <div class="section logSection">
-        <h3>戰報</h3>
-        <div id="log" class="log"></div>
-      </div>
+      <aside class="side onlineSide">
+        <section class="section logSection">
+          <h3>戰鬥紀錄</h3>
+          <div id="log" class="log"></div>
+        </section>
+      </aside>
     </div>
   </div>
-</div>
+</section>
 
-<div id="entryOverlay" class="overlay">
-  <div class="overlayBox">
-    <h2>五連戰線　Alpha</h2>
-    <p class="overlaySub">9×9 棋盤。放下的棋子會互相戰鬥，<b>戰鬥結束後仍然存活的五連</b>才算獲勝。</p>
-    <div class="entryChoices">
-      <button id="entryOnlineBtn" class="btn entryBtn" type="button">
-        <span class="entryTitle">連線對戰</span>
-        <span class="entryDesc">建立或加入房間，跟朋友遠端對戰。<br>使用目前的正式規則。</span>
-      </button>
-      <a id="entryLocalBtn" class="btn entryBtn" href="/local">
-        <span class="entryTitle">單機測試</span>
-        <span class="entryDesc">在本機對電腦或本機雙人試玩。<br>與連線對戰使用<b>同一套規則引擎</b>。</span>
-      </a>
+<div id="passwordOverlay" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="passwordTitle">
+  <div class="overlayBox passwordBox">
+    <span class="sectionEyebrow">受保護房間</span>
+    <h2 id="passwordTitle">輸入房間密碼</h2>
+    <p id="passwordRoomName" class="overlaySub"></p>
+    <input id="joinPasswordInput" class="lobbyInput" type="password" maxlength="32" autocomplete="current-password" placeholder="房間密碼">
+    <div id="passwordError" class="modalNotice" aria-live="polite"></div>
+    <div class="modalActions">
+      <button id="cancelPasswordBtn" class="btn" type="button">取消</button>
+      <button id="confirmPasswordBtn" class="btn primaryLobbyBtn" type="button">加入房間</button>
     </div>
-    <button id="entryHelpBtn" class="btn" type="button" style="margin-top:14px">？ 先看規則</button>
   </div>
 </div>
 

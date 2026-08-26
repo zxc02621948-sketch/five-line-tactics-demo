@@ -12,7 +12,8 @@
   const REQUEST_TIMEOUT_MS = 10_000;          // 專案擁有者指定：等待伺服器狀態最多 10 秒
   if (requestedMode === "alternating") {
     document.title = "五連戰線｜交替先手（開發測試）";
-    $("h1").textContent = "五連戰線｜交替先手（開發測試）";
+    document.querySelectorAll(".lobbyBrand h1, .gameTop h1")
+      .forEach(title => { title.textContent = "五連戰線｜交替先手（開發測試）"; });
     $("#createBtn").textContent = "建立交替先手房間（非正式規則）";
   }
   let socket;
@@ -23,6 +24,11 @@
   let moveFrom = null;                 // 手牌用盡時，已選好要移動的棋子座標
   let opponentConnected = false;
   let roomStatus = "none";
+  let roomInfo = null;
+  let lobbyRooms = [];
+  let lobbyClockDelta = 0;
+  let pendingJoinCode = null;
+  let pendingJoinName = "";
   let state = null;
   let selectedType = null;
   let selectedRank = 1;
@@ -36,6 +42,7 @@
   let combatMatchId = null;
   let lastCombatId = null;
   let pendingCombat = null;
+  const NICKNAME_KEY = "five-line-alpha-nickname";
 
   // 兵種數值一律取自 server 送來的 unitCatalog；尚未進房時退回同一份 game_engine.js
   // 的靜態目錄，兩者是同一個來源，不會漂移。
@@ -53,6 +60,18 @@
   function loadSession() {
     try { return JSON.parse(localStorage.getItem(sessionKey()) || "null"); }
     catch { return null; }
+  }
+
+  function loadNickname() {
+    try { return localStorage.getItem(NICKNAME_KEY) || ""; }
+    catch { return ""; }
+  }
+
+  function nickname() {
+    const value = $("#nicknameInput").value.trim() || "玩家";
+    try { localStorage.setItem(NICKNAME_KEY, value); }
+    catch { /* 瀏覽器停用儲存時仍可用本次輸入 */ }
+    return value;
   }
 
   function send(message) {
@@ -104,16 +123,24 @@
     socket.addEventListener("error", () => { notice = "WebSocket 連線錯誤"; render(); });
     socket.addEventListener("message", event => {
       const message = JSON.parse(event.data);
-      if (message.type === "session") {
+      if (message.type === "lobby") {
+        lobbyRooms = Array.isArray(message.rooms) ? message.rooms : [];
+        lobbyClockDelta = Date.now() - Number(message.serverNow || Date.now());
+      } else if (message.type === "session") {
         saveSession(message);
         roomCode = message.roomCode;
         selfPid = message.pid;
+        notice = "";
+        closePasswordPrompt();
+        $("#roomPasswordInput").value = "";
+        $("#directPasswordInput").value = "";
       } else if (message.type === "state") {
         const previousTurnId = state?.turnId;
         roomCode = message.roomCode;
         selfPid = message.selfPid;
         opponentConnected = message.opponentConnected;
         roomStatus = message.status;
+        roomInfo = message.room || null;
         state = message.state;
         rematchState = message.rematch || { self: false, opponent: false };
         clearPendingRequest();
@@ -126,20 +153,34 @@
       } else if (message.type === "rejected" || message.type === "error") {
         clearPendingRequest();
         pendingTimedOut = false;
-        notice = message.error;
+        if (message.errorCode === "reconnect_failed") {
+          roomCode = null; selfPid = null; state = null; roomStatus = "none"; roomInfo = null;
+          opponentConnected = false;
+          combatPlayback.reset(); combatMatchId = null; lastCombatId = null; pendingCombat = null;
+          try { localStorage.removeItem(sessionKey()); }
+          catch { /* 無儲存權限時沒有舊工作階段可移除 */ }
+          notice = message.error;
+        } else if (["password_required", "password_invalid", "password_rate_limited"].includes(message.errorCode)) {
+          const listedRoom = lobbyRooms.find(room => room.code === message.roomCode);
+          openPasswordPrompt(message.roomCode, listedRoom?.name || pendingJoinName || `房號 ${message.roomCode}`,
+            message.errorCode === "password_required" ? "" : message.error);
+        } else {
+          notice = message.error;
+        }
       } else if (message.type === "accepted") {
         notice = "";
       } else if (message.type === "left") {
         // 主動離開：把本機的房間狀態清乾淨，才不會拿舊房的 state 去比對新的 selfPid
-        roomCode = null; selfPid = null; state = null; roomStatus = null;
+        roomCode = null; selfPid = null; state = null; roomStatus = null; roomInfo = null;
         opponentConnected = false; rematchState = { self: false, opponent: false };
         clearPendingRequest(); pendingTimedOut = false;
         artilleryMode = false; selectedType = null;
         resultReportOpen = false;
         combatPlayback.reset(); combatMatchId = null; lastCombatId = null; pendingCombat = null;
-        localStorage.removeItem(sessionKey());
+        try { localStorage.removeItem(sessionKey()); }
+        catch { /* 無儲存權限時沒有待清除的工作階段 */ }
         notice = "已離開房間。";
-        $("#entryOverlay").classList.remove("hidden");
+        closePasswordPrompt();
       } else if (message.type === "match_log_saved") {
         notice = `終局戰報已儲存：${message.filename}`;
       }
@@ -404,6 +445,14 @@
       turnSection?.classList.toggle(`active-p${pid}`, activePid === pid);
       boardEl.classList.toggle(`active-p${pid}`, activePid === pid);
     }
+    const selfBand = $("#selfBand");
+    const opponentBand = $("#opponentBand");
+    const opponentPid = selfPid === 1 ? 2 : 1;
+    for (const [band, pid] of [[selfBand, selfPid], [opponentBand, opponentPid]]) {
+      band.classList.toggle("p1Band", pid === 1);
+      band.classList.toggle("p2Band", pid === 2);
+      band.classList.toggle("active-turn", activePid === pid);
+    }
     turnText.className = activePid ? `turn p${activePid}t` : "turn";
     handPanel?.classList.toggle("inactive-turn",
       Boolean(state && !state.gameOver && state.current !== selfPid));
@@ -455,75 +504,175 @@
     overlay.classList.remove("hidden");
   }
 
+  function setConnectionBadge(selector) {
+    const element = $(selector);
+    element.textContent = connected ? "伺服器已連線" : "伺服器未連線";
+    element.className = `connection ${connected ? "ok" : "bad"}`;
+  }
+
+  function relativeAge(createdAt) {
+    const serverNow = Date.now() - lobbyClockDelta;
+    const elapsed = Math.max(0, serverNow - Number(createdAt || serverNow));
+    if (elapsed < 60_000) return "剛剛建立";
+    if (elapsed < 60 * 60_000) return `${Math.floor(elapsed / 60_000)} 分鐘前`;
+    if (elapsed < 24 * 60 * 60_000) return `${Math.floor(elapsed / (60 * 60_000))} 小時前`;
+    return `${Math.floor(elapsed / (24 * 60 * 60_000))} 天前`;
+  }
+
+  function textElement(tag, className, value) {
+    const element = document.createElement(tag);
+    element.className = className;
+    element.textContent = value;
+    return element;
+  }
+
+  function closePasswordPrompt() {
+    $("#passwordOverlay").classList.add("hidden");
+    $("#joinPasswordInput").value = "";
+    $("#passwordError").textContent = "";
+    pendingJoinCode = null;
+    pendingJoinName = "";
+  }
+
+  function openPasswordPrompt(code, name, error = "") {
+    if (!code) return;
+    const switchedRoom = pendingJoinCode !== code;
+    pendingJoinCode = code;
+    pendingJoinName = name;
+    $("#passwordRoomName").textContent = `${name}｜房號 ${code}`;
+    $("#passwordError").textContent = error;
+    if (switchedRoom) $("#joinPasswordInput").value = "";
+    $("#passwordOverlay").classList.remove("hidden");
+    setTimeout(() => {
+      $("#joinPasswordInput").focus();
+      if (error) $("#joinPasswordInput").select();
+    }, 0);
+  }
+
+  function joinRoom(code, password = "", roomName = "") {
+    const normalized = String(code || "").trim().toUpperCase();
+    if (!normalized) {
+      notice = "請輸入房號。";
+      render();
+      return;
+    }
+    if (!connected) return;
+    try { localStorage.removeItem(sessionKey()); }
+    catch { /* 無儲存權限時沒有舊工作階段可移除 */ }
+    pendingJoinCode = normalized;
+    pendingJoinName = roomName || `房號 ${normalized}`;
+    notice = "正在加入房間…";
+    send({ type: "join_room", roomCode: normalized, password, nickname: nickname() });
+    render();
+  }
+
+  function renderLobbyRooms() {
+    const roomList = $("#roomList");
+    roomList.replaceChildren();
+    $("#roomCount").textContent = `${lobbyRooms.length} 間`;
+    $("#emptyRooms").classList.toggle("hidden", lobbyRooms.length > 0);
+    roomList.classList.toggle("hidden", lobbyRooms.length === 0);
+    for (const room of lobbyRooms) {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "roomCard";
+      card.setAttribute("aria-label", `加入 ${room.name}，建立者 ${room.createdBy}${room.hasPassword ? "，需要密碼" : ""}`);
+      card.append(
+        textElement("span", "roomCardName", room.name),
+        textElement("span", "roomLock", room.hasPassword ? "🔒" : ""),
+        textElement("span", "roomCreator", `建立者：${room.createdBy}`),
+        textElement("span", "roomAge", relativeAge(room.createdAt)),
+        textElement("span", "roomStatus", "● 等待加入"),
+        textElement("span", "roomJoinHint", room.hasPassword ? "輸入密碼" : "直接加入"),
+      );
+      card.onclick = () => room.hasPassword
+        ? openPasswordPrompt(room.code, room.name)
+        : joinRoom(room.code, "", room.name);
+      roomList.appendChild(card);
+    }
+  }
+
+  function renderWaitingRoom() {
+    const modeLabel = requestedMode === "alternating" ? "｜交替先手（開發測試）" : "";
+    const creator = roomInfo?.players?.[1];
+    const opponent = roomInfo?.players?.[2];
+    $("#seatedRoomName").textContent = roomInfo?.name || "正在取得房間資料…";
+    $("#roomIdentity").textContent = `房號 ${roomCode || "—"}｜你是 P${selfPid || "—"}${modeLabel}`
+      + (notice ? `\n${notice}` : "");
+    $("#seatedCreatorName").textContent = creator?.nickname || roomInfo?.createdBy || "玩家";
+    $("#seatedOpponentName").textContent = opponent?.nickname || "等待對手";
+    $("#seatedOpponentStatus").textContent = opponent?.connected ? "已加入，正在開始" : "尚未加入";
+    $("#seatedOpponentDot").className = `statusDot ${opponent?.connected ? "online" : ""}`.trim();
+  }
+
+  function setPlayerAvatar(selector, pid) {
+    const avatar = $(selector);
+    avatar.textContent = pid ? `P${pid}` : "P?";
+    avatar.className = `playerAvatar ${pid === 1 ? "p1Avatar" : pid === 2 ? "p2Avatar" : "neutralAvatar"}`;
+  }
+
+  function renderPlayerBands() {
+    const opponentPid = selfPid === 1 ? 2 : 1;
+    const ownSeat = roomInfo?.players?.[selfPid];
+    const opponentSeat = roomInfo?.players?.[opponentPid];
+    setPlayerAvatar("#selfAvatar", selfPid);
+    setPlayerAvatar("#opponentAvatar", opponentPid);
+    $("#selfName").textContent = ownSeat?.nickname || "你";
+    $("#selfRole").textContent = `P${selfPid}｜你`;
+    $("#opponentName").textContent = opponentSeat?.nickname || "對手";
+    $("#opponentRole").textContent = `P${opponentPid}｜對手`;
+    $("#selfHandCount").textContent = String(state.own.hand.length);
+    $("#opponentHandCount").textContent = String(state.opponent.handCount);
+    $("#selfArtillery").textContent = String(state.artillery[selfPid]);
+    $("#opponentArtillery").textContent = String(state.artillery[opponentPid]);
+    $("#opponentStatusDot").className = `statusDot ${opponentConnected ? "online" : "offline"}`;
+    $("#opponentConnectionText").textContent = opponentConnected ? "已連線"
+      : roomStatus === "opponent_left" ? "已離開" : "已斷線";
+  }
+
   function render() {
     syncCombatCue();
-    $("#socketStatus").textContent = connected ? "伺服器已連線" : "伺服器未連線";
-    $("#socketStatus").className = `connection ${connected ? "ok" : "bad"}`;
-    // 入座後就不再顯示建立／加入：先前可以在對局中跳到別的房，
-    // 結果是對手被永久留在「對手已斷線」，自己也可能佔到自己那間房的另一個座位。
+    setConnectionBadge("#socketStatus");
+    setConnectionBadge("#gameSocketStatus");
+    const inGame = Boolean(state);
     const seated = Boolean(roomCode);
-    for (const id of ["#createBtn", "#joinBtn", "#roomInput"]) {
-      $(id).classList.toggle("hidden", seated);
-    }
+    $("#lobbyScreen").classList.toggle("hidden", inGame);
+    $("#gameScreen").classList.toggle("hidden", !inGame);
+    const lobbyLayout = document.querySelector(".lobbyLayout");
+    lobbyLayout.classList.toggle("seated", seated);
+    $("#roomDirectory").classList.toggle("hidden", seated);
+    $("#unseatedPanel").classList.toggle("hidden", seated);
+    $("#seatedRoomPanel").classList.toggle("hidden", !seated);
+    $("#lobbyNotice").textContent = notice;
+    renderLobbyRooms();
+
     const createButton = $("#createBtn");
     const joinButton = $("#joinBtn");
     const createLabel = requestedMode === "alternating" ? "建立交替先手房間（非正式規則）" : "建立房間";
-    createButton.disabled = !connected;
+    createButton.disabled = !connected || seated;
     createButton.textContent = connected ? createLabel : `${createLabel}｜等待連線`;
     createButton.title = connected ? "" : "尚未連上伺服器";
-    joinButton.disabled = !connected;
+    joinButton.disabled = !connected || seated;
     joinButton.textContent = connected ? "加入房間" : "加入房間｜等待連線";
     joinButton.title = connected ? "" : "尚未連上伺服器";
-    $("#leaveRoomBtn").classList.toggle("hidden", !seated);
-    const over = Boolean(state?.gameOver);
-    const rematchBtn = $("#rematchBtn");
-    rematchBtn.classList.toggle("hidden", !over);
-    const rematch = rematchControl();
-    rematchBtn.disabled = rematch.disabled;
-    rematchBtn.textContent = rematch.text;
-    rematchBtn.title = rematch.disabled ? rematch.text : "";
+    if (seated && !inGame) renderWaitingRoom();
+    if (!state) {
+      $("#resultOverlay").classList.add("hidden");
+      return;
+    }
+
+    $("#gameRoomName").textContent = roomInfo?.name || "連線對戰";
+    $("#gameRoomCode").textContent = roomCode ? `房號 ${roomCode}` : "";
+    renderPlayerBands();
     const leaveRoomButton = $("#leaveRoomBtn");
     leaveRoomButton.disabled = !connected;
     leaveRoomButton.textContent = connected ? "離開房間" : "離開房間｜等待連線";
     leaveRoomButton.title = connected ? "" : "尚未連上伺服器";
-    const modeLabel = (state?.turnOrderMode || requestedMode) === "alternating" ? "｜交替先手（開發測試）" : "";
-    $("#roomIdentity").textContent = roomCode ? `房號 ${roomCode}｜你是 P${selfPid}${modeLabel}` : "";
-    $("#copyRoomBtn").classList.toggle("hidden", !roomCode);
-    // 重連成功後直接進遊戲，不要再擋一層入口畫面
-    if (roomCode) $("#entryOverlay").classList.add("hidden");
-
-    const statusTexts = {
-      none: "尚未建立或加入房間。",
-      waiting: "房間已建立，正在等待 P2 加入。",
-      ready: "兩名玩家已連線，準備開始。",
-      playing: "雙方連線正常。",
-      opponent_disconnected: "對手已斷線；房間會暫時保留，等待原玩家重連。",
-      opponent_left: "對手已離開房間，本局無法繼續。請按「離開房間」再開新局。",
-      finished: "本局已結束。雙方都按「再來一局」即可用同一間房再開一場。",
-    };
-    $("#connectionDetail").textContent = `${statusTexts[roomStatus] || statusTexts.none}${notice ? `\n${notice}` : ""}`;
-    $("#connectionDetail").className = `combatPreview ${roomStatus === "opponent_disconnected" || !connected ? "bad" : roomStatus === "waiting" ? "wait" : ""}`;
     if (!combatPlayback.active()) renderBoard();
     renderHand();
     renderLogs();
     renderForecast();
     renderTurnVisual();
-
-    const privacyInfo = $("#privacyInfo");
-    const summarySection = $("#matchSummarySection");
-    if (!state) {
-      $("#turnText").textContent = roomCode ? "等待對手" : "";
-      $("#turnStatus").textContent = notice
-        ? `兩人連線後由伺服器建立正式遊戲狀態。\n${notice}`
-        : "兩人連線後由伺服器建立正式遊戲狀態。";
-      const badge = $("#phaseBadge");
-      badge.textContent = "";
-      badge.className = "phaseBadge";
-      privacyInfo.classList.add("hidden");
-      summarySection.classList.add("hidden");
-      renderResultOverlay();
-      return;
-    }
     const phase = state.gameOver ? { text: "", full: "", level: "none" } : AlphaUI.matchPhaseLabel(state);
     // 警示走獨立的固定格；turnText 是 nowrap+ellipsis，塞進去會被截掉。
     const badge = $("#phaseBadge");
@@ -545,11 +694,6 @@
         ? state.artilleryUsedThisTurn ? "輪到你：炮擊已使用，必須完成部署" : "輪到你：可先炮擊，然後部署"
       : "等待對方完成操作";
     $("#turnStatus").textContent = notice ? `${actionText}\n${notice}` : actionText;
-    $("#artilleryOverview").textContent = `公開炮擊資源｜P1：${state.artillery[1]} 發｜P2：${state.artillery[2]} 發`;
-    const p1Cards = state.cardDistribution.P1;
-    const p2Cards = state.cardDistribution.P2;
-    privacyInfo.textContent = `自己的手牌：${state.own.hand.length} 張｜對方手牌：${state.opponent.handCount} 張（內容隱藏）\n${cardLine("P1", p1Cards)}\n${cardLine("P2", p2Cards)}`;
-    privacyInfo.classList.remove("hidden");
     const artilleryButton = $("#artilleryBtn");
     const artilleryBase = `炮擊（P${selfPid} 剩 ${state.artillery[selfPid]} 發）`;
     const disabledReason = artilleryReason();
@@ -557,27 +701,29 @@
     artilleryButton.disabled = Boolean(disabledReason);
     artilleryButton.title = disabledReason;
     artilleryButton.className = `btn art artBtn ${artilleryMode ? "active" : "ready"}`;
-
-    if (state.gameOver) {
-      summarySection.classList.remove("hidden");
-      const ownRounds = state.logs.filter(item => item.kind === (selfPid === 1 ? "r" : "b") && item.text.includes("炮擊")).map(item => item.round);
-      summarySection.querySelector("#matchSummary").textContent = `勝負：${UI.resultLabel(state)}\n最終輪數：${state.roundNo}\n你的炮擊輪數：${ownRounds.join("、") || "未使用"}\n剩餘炮擊：P1 ${state.artillery[1]}／P2 ${state.artillery[2]}\n${cardLine("P1 卡片", p1Cards)}\n${cardLine("P2 卡片", p2Cards)}`;
-    } else summarySection.classList.add("hidden");
     renderResultOverlay();
     startPendingCombat();
   }
 
-  // ---- 入口：單機 / 連線兩個模式。只是 UI 層，server routing 不動 ----
-  const entryOverlay = $("#entryOverlay");
-  const showEntry = () => entryOverlay.classList.remove("hidden");
-  const hideEntry = () => entryOverlay.classList.add("hidden");
-  $("#entryOnlineBtn").onclick = hideEntry;
-  $("#backToEntryBtn").onclick = showEntry;      // 只切換畫面，不動房間或對局狀態
-
   // ---- 規則視窗：文案與開關都由共用的 AlphaUI 提供 ----
   UI.wireRulesOverlay(catalog);
 
-  $("#createBtn").onclick = () => { localStorage.removeItem(sessionKey()); send({ type: "create_room", mode: requestedMode }); };
+  $("#nicknameInput").value = loadNickname();
+  $("#nicknameInput").addEventListener("change", nickname);
+  $("#createBtn").onclick = () => {
+    if (!connected) return;
+    try { localStorage.removeItem(sessionKey()); }
+    catch { /* 無儲存權限時沒有舊工作階段可移除 */ }
+    notice = "正在建立房間…";
+    send({
+      type: "create_room",
+      mode: requestedMode,
+      nickname: nickname(),
+      name: $("#roomNameInput").value,
+      password: $("#roomPasswordInput").value,
+    });
+    render();
+  };
   $("#copyRoomBtn").onclick = async () => {
     if (!roomCode) return;
     try { await navigator.clipboard.writeText(roomCode); notice = `已複製房號 ${roomCode}`; }
@@ -585,14 +731,41 @@
     render();
   };
   $("#joinBtn").onclick = () => {
-    localStorage.removeItem(sessionKey());
-    send({ type: "join_room", roomCode: $("#roomInput").value.trim().toUpperCase() });
+    const code = $("#roomInput").value.trim().toUpperCase();
+    if (code.length !== 6) {
+      notice = "請輸入完整的 6 碼房號。";
+      render();
+      return;
+    }
+    joinRoom(code, $("#directPasswordInput").value);
   };
+  $("#roomInput").addEventListener("input", event => { event.target.value = event.target.value.toUpperCase(); });
   $("#roomInput").addEventListener("keydown", event => { if (event.key === "Enter") $("#joinBtn").click(); });
+  const submitPassword = () => {
+    if (!pendingJoinCode) return;
+    const password = $("#joinPasswordInput").value;
+    if (!password) {
+      $("#passwordError").textContent = "請輸入房間密碼。";
+      return;
+    }
+    const code = pendingJoinCode;
+    const name = pendingJoinName;
+    $("#passwordError").textContent = "正在驗證…";
+    joinRoom(code, password, name);
+  };
+  $("#confirmPasswordBtn").onclick = submitPassword;
+  $("#cancelPasswordBtn").onclick = closePasswordPrompt;
+  $("#joinPasswordInput").addEventListener("keydown", event => { if (event.key === "Enter") submitPassword(); });
+  $("#passwordOverlay").addEventListener("click", event => {
+    if (event.target === $("#passwordOverlay")) closePasswordPrompt();
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") closePasswordPrompt();
+  });
   $("#artilleryBtn").onclick = () => { if (ownTurn()) { artilleryMode = !artilleryMode; selectedType = null; render(); } };
   const requestRematch = () => { if (!rematchControl().disabled) send({ type: "rematch" }); };
   const leaveRoom = () => { if (connected && roomCode) send({ type: "leave_room" }); };
-  $("#rematchBtn").onclick = requestRematch;
+  $("#leaveWaitingBtn").onclick = leaveRoom;
   $("#leaveRoomBtn").onclick = leaveRoom;
   $("#resultRematchBtn").onclick = requestRematch;
   $("#resultLeaveBtn").onclick = leaveRoom;
@@ -601,6 +774,9 @@
     renderResultOverlay();
   };
 
+  setInterval(() => {
+    if (!roomCode && !state) renderLobbyRooms();
+  }, 30_000);
   render();
   connect();
 })();

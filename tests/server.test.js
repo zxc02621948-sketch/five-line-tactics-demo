@@ -8,7 +8,7 @@ const { baseStats } = require("../game_engine");
 
 const tempLogDir = fs.mkdtempSync(path.join(os.tmpdir(), "five-line-alpha-"));
 process.env.MATCH_LOG_DIR = tempLogDir;
-const { server, wss, rooms } = require("../server");
+const { server, wss, rooms, limits } = require("../server");
 
 function client(url) {
   const ws = new WebSocket(url);
@@ -225,13 +225,17 @@ test("進行中的對局不准跳槽；結束後可用同一房再來一局；�
 
   // ---- 1) 對局進行中不准跳到別的房，也不准另開新房 ----
   c.send({ type: "create_room" });
-  const roomC = (await c.wait(m => m.type === "session")).roomCode;
+  const roomCSession = await c.wait(m => m.type === "session");
+  const roomC = roomCSession.roomCode;
   b.send({ type: "join_room", roomCode: roomC });
   const jumpError = await b.wait(m => m.type === "error");
   assert.match(jumpError.error, /進行中的對局/,
     "對局中跳槽會把對手永久留在「對手已斷線」，必須擋下來");
   b.send({ type: "create_room" });
   assert.match((await b.wait(m => m.type === "error")).error, /進行中的對局/);
+  b.send({ type: "reconnect", roomCode: roomC, token: roomCSession.token });
+  assert.match((await b.wait(m => m.type === "error")).error, /進行中的對局/,
+    "持有其他房間 token 也不能用重連繞過跳槽守衛");
   // 已在進行中的對局裡時，連回原房也是同一道守衛先攔（順序正確）
   b.send({ type: "join_room", roomCode: roomA });
   assert.match((await b.wait(m => m.type === "error")).error, /進行中的對局/);
@@ -290,4 +294,91 @@ test("進行中的對局不准跳槽；結束後可用同一房再來一局；�
   assert.equal(abandoned.status, "opponent_left");
   assert.equal(rooms.get(roomA).players[2], null, "座位要真的空出來");
   a.ws.close(); b.ws.close(); c.ws.close();
+});
+
+test("階段三大廳只列等待房，保護密碼與 token，並限制密碼猜測", async t => {
+  rooms.clear();
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    for (const socket of wss.clients) socket.close();
+    await new Promise(resolve => server.close(resolve));
+    rooms.clear();
+  });
+  const url = `ws://127.0.0.1:${server.address().port}/ws`;
+  const observer = client(url), host = client(url), guest = client(url), attacker = client(url);
+  await Promise.all([observer.open(), host.open(), guest.open(), attacker.open()]);
+  const initialLobby = await observer.wait(message => message.type === "lobby");
+  assert.deepEqual(initialLobby.rooms, []);
+
+  const rawRoomName = `\u202e戰略\u0000房-${"長".repeat(30)}`;
+  const secret = "霧鎖-7788";
+  host.send({ type: "create_room", name: rawRoomName, password: secret,
+    nickname: "<img src=x onerror=1>房主" });
+  const hostSession = await host.wait(message => message.type === "session");
+  const code = hostSession.roomCode;
+  const waitingState = await host.wait(message => message.type === "state" && message.status === "waiting");
+  const listed = await observer.wait(message => message.type === "lobby"
+    && message.rooms.some(room => room.code === code));
+  const card = listed.rooms.find(room => room.code === code);
+  assert.deepEqual(Object.keys(card).sort(),
+    ["code", "createdAt", "createdBy", "hasPassword", "name", "status"]);
+  assert.equal(card.status, "waiting");
+  assert.equal(card.hasPassword, true);
+  assert.ok([...card.name].length <= limits.ROOM_NAME_MAX);
+  assert.doesNotMatch(card.name, /[\u0000-\u001f\u202a-\u202e\u2066-\u2069]/);
+  assert.equal(JSON.stringify(card).includes(secret), false, "大廳卡不得含原始密碼");
+  assert.equal(JSON.stringify(card).includes(hostSession.token), false, "大廳卡不得含重連 token");
+  assert.equal(JSON.stringify(waitingState.room).includes(hostSession.token), false,
+    "房內公開資料也不得夾帶 token");
+  assert.equal(Buffer.isBuffer(rooms.get(code).password.salt), true, "伺服器保存隨機鹽值");
+  assert.equal(Buffer.isBuffer(rooms.get(code).password.digest), true, "伺服器只保存加鹽密碼摘要");
+  assert.equal(rooms.get(code).players[1].token, hostSession.token, "座位身分仍以 token 為準");
+  assert.equal(rooms.get(code).players[1].nickname, card.createdBy, "暱稱只作公開標籤");
+
+  guest.send({ type: "join_room", roomCode: code, nickname: "挑戰者" });
+  assert.equal((await guest.wait(message => message.errorCode === "password_required")).error,
+    "此房間需要密碼");
+  guest.send({ type: "join_room", roomCode: code, password: "錯誤", nickname: "挑戰者" });
+  assert.equal((await guest.wait(message => message.errorCode === "password_invalid")).error,
+    "房間密碼錯誤");
+  assert.equal(rooms.get(code).players[2], null, "密碼錯誤不能占座");
+  guest.send({ type: "join_room", roomCode: code, password: secret, nickname: "挑戰者" });
+  await guest.wait(message => message.type === "session" && message.roomCode === code);
+  await Promise.all([
+    host.wait(message => message.type === "state" && message.state),
+    guest.wait(message => message.type === "state" && message.state),
+  ]);
+  const afterStart = await observer.wait(message => message.type === "lobby"
+    && !message.rooms.some(room => room.code === code));
+  assert.equal(afterStart.rooms.some(room => room.code === code), false,
+    "已開始對局不得出現在等待房列表");
+
+  const waitingHost = client(url);
+  await waitingHost.open();
+  waitingHost.send({ type: "create_room", name: "稍候刪除", nickname: "短暫房主" });
+  const waitingSession = await waitingHost.wait(message => message.type === "session");
+  const waitingCode = waitingSession.roomCode;
+  await observer.wait(message => message.type === "lobby"
+    && message.rooms.some(room => room.code === waitingCode));
+  waitingHost.send({ type: "leave_room" });
+  await waitingHost.wait(message => message.type === "left");
+  await observer.wait(message => message.type === "lobby"
+    && !message.rooms.some(room => room.code === waitingCode));
+  assert.equal(rooms.has(waitingCode), false, "建立者離開等待房後要立即刪除房間");
+
+  const rateHost = client(url);
+  await rateHost.open();
+  rateHost.send({ type: "create_room", name: "防猜密碼", password: "正確密碼", nickname: "守門人" });
+  const rateCode = (await rateHost.wait(message => message.type === "session")).roomCode;
+  for (let attempt = 0; attempt < limits.PASSWORD_ATTEMPT_LIMIT; attempt++) {
+    attacker.send({ type: "join_room", roomCode: rateCode, password: `錯誤-${attempt}` });
+    await attacker.wait(message => message.errorCode === "password_invalid" && message.roomCode === rateCode);
+  }
+  attacker.send({ type: "join_room", roomCode: rateCode, password: "仍然錯誤" });
+  assert.equal((await attacker.wait(message => message.errorCode === "password_rate_limited"
+    && message.roomCode === rateCode)).error, "密碼嘗試過多，請稍後再試");
+  assert.equal(rooms.get(rateCode).players[2], null, "限流後仍不能占座");
+
+  observer.ws.close(); host.ws.close(); guest.ws.close(); attacker.ws.close();
+  waitingHost.ws.close(); rateHost.ws.close();
 });
