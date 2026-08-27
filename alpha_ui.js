@@ -770,12 +770,50 @@
     return "";
   }
 
+  // 戰鬥紀錄是覆蓋式抽屜：預設收起，開關只改顯示狀態，不參與棋盤版面計算。
+  function wireBattleLogDrawer() {
+    const drawer = document.querySelector("#logDrawer");
+    const toggle = document.querySelector("#logDrawerToggle");
+    const closeButton = document.querySelector("#logDrawerClose");
+    const menu = document.querySelector("#matchMenu");
+    if (!drawer || !toggle || !closeButton) return null;
+
+    let restoreFocus = menu?.querySelector("summary") || toggle;
+    const setOpen = open => {
+      if (open) restoreFocus = menu?.querySelector("summary") || document.activeElement || toggle;
+      drawer.classList.toggle("hidden", !open);
+      drawer.setAttribute("aria-hidden", String(!open));
+      toggle.setAttribute("aria-expanded", String(open));
+      if (menu) menu.open = false;
+      if (open) closeButton.focus();
+      else if (drawer.contains(document.activeElement)) restoreFocus?.focus?.();
+    };
+
+    toggle.addEventListener("click", () => setOpen(true));
+    closeButton.addEventListener("click", () => setOpen(false));
+    drawer.addEventListener("click", event => {
+      if (event.target === drawer) setOpen(false);
+    });
+    document.addEventListener("click", event => {
+      if (menu?.open && !menu.contains(event.target)) menu.open = false;
+    });
+    document.addEventListener("keydown", event => {
+      if (event.key !== "Escape") return;
+      if (!drawer.classList.contains("hidden")) setOpen(false);
+      else if (menu?.open) {
+        menu.open = false;
+        menu.querySelector("summary")?.focus();
+      }
+    });
+    return { close: () => setOpen(false), open: () => setOpen(true) };
+  }
+
   globalThis.AlphaUI = {
     ICONS, NAMES, SHORT_TAG, ELITE_TAG, ABILITY, ELITE_ABILITY,
     handCardHtml, unitHtml, unitTitle, cardDetailHtml, renderCardDetail, rulesHtml, wireRulesOverlay,
     autoSizeBoard, forecast, focusOn, drawForecast, forecastArtillery, drawArtillery,
     hasCombatPlayback, createCombatPlayback,
     matchPhaseLabel, resultLabel, resultReasonLabel, finalFiveOwner,
-    artilleryDisabledReason, endTurnDisabledReason, rankDisabledReason,
+    artilleryDisabledReason, endTurnDisabledReason, rankDisabledReason, wireBattleLogDrawer,
   };
 })();

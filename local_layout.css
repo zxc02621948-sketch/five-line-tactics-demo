@@ -227,13 +227,13 @@ body {
   height: 310px;
 }
 
-/* 戰況側欄使用固定三列；文字增加時只在各自區塊內捲動。 */
+/* 戰況側欄使用固定兩列；戰鬥紀錄移到覆蓋式抽屜，不再常駐佔位。 */
 .side {
   padding: 10px;
   display: grid;
   /* 第四階段多一列固定高度的「結束回合」。335px 正好保留原本各列與說明槽，
      不讓新按鈕溢出後被 section 的 overflow 裁掉。 */
-  grid-template-rows: 335px 112px minmax(0, 1fr);
+  grid-template-rows: 335px minmax(112px, 1fr);
   gap: 9px;
   overflow: hidden;
 }
@@ -367,8 +367,7 @@ body {
   overflow: auto;
 }
 
-.previewSection,
-.logSection {
+.previewSection {
   display: grid;
   grid-template-rows: 20px minmax(0, 1fr);
 }
@@ -376,13 +375,6 @@ body {
 .previewSection .combatPreview {
   min-height: 0;
   overflow: auto;
-}
-
-.logSection .log {
-  height: auto;
-  min-height: 0;
-  overflow: auto;
-  scrollbar-gutter: stable;
 }
 
 /* 中等寬度：保持固定槽位，手牌移到底部以保住棋盤可用寬度。 */
@@ -519,7 +511,7 @@ body {
   .side {
     height: 620px;
     margin: 0;
-    grid-template-rows: 335px 112px minmax(0, 1fr);
+    grid-template-rows: 335px minmax(112px, 1fr);
   }
 
   .cardDetail {

@@ -731,8 +731,12 @@
     renderPlayerBands();
     const leaveRoomButton = $("#leaveRoomBtn");
     leaveRoomButton.disabled = !connected;
-    leaveRoomButton.textContent = connected ? "離開房間" : "離開房間｜等待連線";
-    leaveRoomButton.title = connected ? "" : "尚未連上伺服器";
+    leaveRoomButton.textContent = connected
+      ? state.gameOver ? "離開房間" : "棄賽並離開"
+      : "離開房間｜等待連線";
+    leaveRoomButton.title = connected
+      ? state.gameOver ? "" : "離開後本局會中止，對手會看到你已離開"
+      : "尚未連上伺服器";
     if (!combatPlayback.active()) renderBoard();
     renderHand();
     renderLogs();
@@ -787,6 +791,7 @@
 
   // ---- 規則視窗：文案與開關都由共用的 AlphaUI 提供 ----
   UI.wireRulesOverlay(catalog);
+  UI.wireBattleLogDrawer();
 
   $("#nicknameInput").value = loadNickname();
   $("#nicknameInput").addEventListener("change", nickname);

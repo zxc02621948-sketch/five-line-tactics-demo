@@ -406,7 +406,7 @@
 }
 
 .onlineGameLayout {
-  grid-template-columns: minmax(0, 1fr) minmax(220px, 250px);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .onlineGameCol {
@@ -534,14 +534,6 @@
   white-space: normal;
 }
 
-.onlineSide {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
-}
-.onlineSide .logSection {
-  min-height: 0;
-}
-
 @keyframes waitingRoomPulse {
   70% { box-shadow: 0 0 0 9px rgba(255, 212, 59, 0); }
   100% { box-shadow: 0 0 0 0 rgba(255, 212, 59, 0); }
@@ -549,7 +541,6 @@
 
 @media (max-width: 1100px) {
   .roomList { grid-template-columns: minmax(0, 1fr); }
-  .onlineGameLayout { grid-template-columns: minmax(0, 1fr) 210px; }
   .selfBand.turnSection {
     grid-template-columns: 40px minmax(92px, .7fr) minmax(145px, 1fr) minmax(155px, 1.15fr) auto minmax(220px, 1fr);
     gap: 7px;
@@ -575,18 +566,11 @@
     min-height: 100vh;
     overflow: visible;
   }
-  .onlineGameLayout {
-    grid-template-columns: minmax(0, 1fr);
-  }
   .onlineGameCol {
     grid-template-rows: 60px min(94vw, 72vh) 112px 188px;
   }
   .selfBand.turnSection {
     grid-template-columns: 38px minmax(90px, .7fr) minmax(150px, 1fr) minmax(140px, 1fr) auto minmax(210px, .9fr);
-    grid-template-rows: minmax(0, 1fr);
-  }
-  .onlineSide {
-    height: 190px;
     grid-template-rows: minmax(0, 1fr);
   }
 }

@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>五連戰線｜連線對戰</title>
   <link rel="icon" href="/icon-192.png">
-  <link rel="stylesheet" href="/alpha_board.css?v=17">
+  <link rel="stylesheet" href="/alpha_board.css?v=18">
   <link rel="stylesheet" href="/game_shell.css?v=17">
-  <link rel="stylesheet" href="/local_layout.css?v=17">
-  <link rel="stylesheet" href="/online_layout.css?v=17">
+  <link rel="stylesheet" href="/local_layout.css?v=18">
+  <link rel="stylesheet" href="/online_layout.css?v=18">
 </head>
 <body>
 <section id="lobbyScreen" class="lobbyScreen">
@@ -109,7 +109,6 @@
         相剋　<b>🛡盾</b> → <b>⚔劍</b> → <b>🔱槍</b> → <b>🛡盾</b>
       </span>
       <button id="helpBtn" class="btn helpBtn" type="button">？ 規則</button>
-      <button id="leaveRoomBtn" class="btn danger" type="button">離開房間</button>
     </header>
 
     <div class="layout onlineGameLayout">
@@ -174,11 +173,27 @@
         </div>
       </div>
 
-      <aside class="side onlineSide">
-        <section class="section logSection">
-          <h3>戰鬥紀錄</h3>
-          <div id="log" class="log"></div>
-        </section>
+    </div>
+
+    <details id="matchMenu" class="matchMenu">
+      <summary class="btn matchMenuSummary">⋯ 對局選單</summary>
+      <div class="matchMenuPanel">
+        <button id="logDrawerToggle" class="btn" type="button"
+          aria-controls="logDrawer" aria-expanded="false">戰鬥紀錄</button>
+        <button id="leaveRoomBtn" class="btn danger" type="button">棄賽並離開</button>
+      </div>
+    </details>
+
+    <div id="logDrawer" class="logDrawer hidden" aria-hidden="true">
+      <aside class="logDrawerPanel logSection" role="dialog" aria-modal="true" aria-labelledby="logDrawerTitle">
+        <div class="logDrawerHead">
+          <div>
+            <span class="drawerEyebrow">本局事件</span>
+            <h2 id="logDrawerTitle">戰鬥紀錄</h2>
+          </div>
+          <button id="logDrawerClose" class="btn" type="button">關閉</button>
+        </div>
+        <div id="log" class="log" aria-live="polite"></div>
       </aside>
     </div>
   </div>

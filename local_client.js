@@ -529,6 +529,7 @@ ${notice}` : text;
 
   // ---- 綁定 ----
   UI.wireRulesOverlay(catalog);
+  UI.wireBattleLogDrawer();
   $("#artilleryBtn").onclick = () => { if (humanTurn()) { artilleryMode = !artilleryMode; artilleryPlan = null; render(); } };
   $("#endTurnBtn").onclick = () => {
     if (endTurnReason()) return;

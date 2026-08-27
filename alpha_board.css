@@ -152,6 +152,113 @@
 .rulesBody th, .rulesBody td { border: 1px solid #343d4d; padding: 5px 8px; text-align: left; }
 .rulesBody th { color: #aab4c3; font-weight: 600; }
 
+/* ---- 次要對局選單與戰鬥紀錄抽屜 ----
+   選單固定在畫面邊緣，抽屜覆蓋內容；兩者都不參與棋盤排版，因此開關時不會造成跳動。 */
+.matchMenu {
+  position: fixed;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: max(14px, env(safe-area-inset-bottom));
+  z-index: 44;
+}
+.matchMenuSummary {
+  min-width: 118px;
+  list-style: none;
+  border-color: #596579;
+  background: rgba(29, 36, 48, .96);
+  box-shadow: 0 9px 28px rgba(0, 0, 0, .38);
+  text-align: center;
+}
+.matchMenuSummary::-webkit-details-marker { display: none; }
+.matchMenu[open] .matchMenuSummary {
+  border-color: var(--warn);
+  color: #fff4bd;
+}
+.matchMenuPanel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: min(220px, calc(100vw - 24px));
+  padding: 8px;
+  display: grid;
+  gap: 7px;
+  border: 1px solid #465269;
+  border-radius: 12px;
+  background: #171d27;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .5);
+}
+.matchMenuPanel .btn {
+  width: 100%;
+  text-align: left;
+}
+.matchMenuPanel .btn.danger { color: #ffc9c9; }
+
+.logDrawer {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(5, 8, 13, .58);
+  backdrop-filter: blur(2px);
+}
+.logDrawerPanel {
+  width: min(430px, 100%);
+  height: 100%;
+  min-height: 0;
+  padding: 18px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+  border-left: 1px solid #4b5870;
+  background: #151b25;
+  box-shadow: -18px 0 55px rgba(0, 0, 0, .55);
+  animation: logDrawerIn .18s ease-out;
+}
+.logDrawerHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.logDrawerHead h2 {
+  margin: 3px 0 0;
+  font-size: 21px;
+}
+.drawerEyebrow {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .18em;
+}
+.logDrawer .log {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid #2f3948;
+  scrollbar-gutter: stable;
+}
+@keyframes logDrawerIn {
+  from { transform: translateX(28px); opacity: .72; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .logDrawerPanel { animation: none; }
+}
+
+@media (max-width: 560px) {
+  .matchMenu {
+    right: max(8px, env(safe-area-inset-right));
+    bottom: max(8px, env(safe-area-inset-bottom));
+  }
+  .matchMenuSummary { min-width: 108px; }
+  .logDrawerPanel {
+    width: 100%;
+    padding: 14px;
+    border-left: 0;
+  }
+}
+
 /* ---- 終局覆蓋層：固定在版面外，不推擠棋盤；戰報只在覆蓋層內展開 ---- */
 .resultOverlay {
   z-index: 60;
