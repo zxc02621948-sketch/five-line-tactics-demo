@@ -187,12 +187,15 @@ function roomStatus(room, pid) {
 
 function broadcastRoom(room) {
   room.lastActivity = Date.now();
+  const serverNow = Date.now();
+  const disconnectMs = GameEngine.timeoutRules().disconnectMs;
   for (const pid of [1, 2]) {
     const seat = room.players[pid];
     if (!seat?.connected) continue;
     const opponent = room.players[pid === 1 ? 2 : 1];
     sendJson(seat.ws, {
       type: "state",
+      serverNow,
       roomCode: room.code,
       selfPid: pid,
       opponentConnected: Boolean(opponent?.connected),
@@ -200,6 +203,9 @@ function broadcastRoom(room) {
       roomMode: room.mode,
       room: publicRoomDetails(room),
       rematch: { self: Boolean(seat.rematchWanted), opponent: Boolean(opponent?.rematchWanted) },
+      opponentDisconnectDeadline: opponent?.disconnectedAt
+        ? opponent.disconnectedAt + disconnectMs
+        : null,
       state: room.game ? room.game.visibleStateFor(pid) : null,
     });
   }
@@ -215,7 +221,15 @@ function maybeStart(room) {
     });
     room.startedAt = Date.now();
   }
+  syncTurnClock(room);
   broadcastRoom(room);
+}
+
+function syncTurnClock(room, now = Date.now()) {
+  if (!room.game || room.game.gameOver) return;
+  const bothConnected = [1, 2].every(pid => room.players[pid]?.connected);
+  if (bothConnected) room.game.resumeTurnClock(now);
+  else room.game.pauseTurnClock(now);
 }
 
 function attachSocket(ws, room, pid) {
@@ -223,6 +237,7 @@ function attachSocket(ws, room, pid) {
   room.players[pid].ws = ws;
   room.players[pid].connected = true;
   room.players[pid].disconnectedAt = null;
+  syncTurnClock(room);
   sendJson(ws, { type: "session", roomCode: room.code, pid, token: room.players[pid].token });
 }
 
@@ -237,6 +252,23 @@ async function saveMatch(room) {
   await fs.promises.writeFile(target, JSON.stringify(room.game.fullMatchReport(), null, 2), "utf8");
   room.logPath = target;
   console.log(`Match log saved: ${target}`);
+}
+
+async function finalizeMatch(room) {
+  if (!room.game?.gameOver) return;
+  try {
+    await saveMatch(room);
+    for (const pid of [1, 2]) {
+      const seat = room.players[pid];
+      if (seat?.connected) sendJson(seat.ws, { type: "match_log_saved", filename: path.basename(room.logPath) });
+    }
+  } catch (error) {
+    console.error("Failed to save match log", error);
+    for (const pid of [1, 2]) {
+      const seat = room.players[pid];
+      if (seat?.connected) sendJson(seat.ws, { type: "error", error: "終局戰報儲存失敗，請查看伺服器終端" });
+    }
+  }
 }
 
 function detachPreviousSession(ws, releaseSeat = false) {
@@ -257,6 +289,7 @@ function detachPreviousSession(ws, releaseSeat = false) {
       seat.connected = false;
       seat.ws = null;
       seat.disconnectedAt = Date.now();
+      syncTurnClock(room, seat.disconnectedAt);
       broadcastRoom(room);
     }
     broadcastLobby();
@@ -386,6 +419,7 @@ function rematch(ws) {
       // 舊局的 requestId 不能沿用，否則會被當成重送而直接回覆舊結果
       room.players[pid].processedRequests.clear();
     }
+    syncTurnClock(room);
   }
   broadcastRoom(room);
 }
@@ -417,6 +451,12 @@ async function handleAction(ws, message) {
   if (!session) return sendJson(ws, { type: "rejected", requestId: message.requestId, error: "尚未加入房間" });
   const room = rooms.get(session.roomCode);
   if (!room?.game) return sendJson(ws, { type: "rejected", requestId: message.requestId, error: "仍在等待另一名玩家" });
+  // 伺服器收到操作時先結算已到期的回合，避免玩家在 20 秒截止後、輪詢器下一拍前偷送行動。
+  const timedOut = room.game.checkTurnTimeout(Date.now());
+  if (timedOut?.ok) {
+    broadcastRoom(room);
+    await finalizeMatch(room);
+  }
   const opponentPid = session.pid === 1 ? 2 : 1;
   if (!room.players[opponentPid]?.connected) {
     return sendJson(ws, { type: "rejected", requestId: message.requestId, error: "對手已斷線，請等待重連" });
@@ -437,6 +477,8 @@ async function handleAction(ws, message) {
   if (intent.kind === "deploy") result = room.game.deploy(session.pid, intent);
   else if (intent.kind === "move") result = room.game.move(session.pid, intent);
   else if (intent.kind === "artillery") result = room.game.artillery(session.pid, intent);
+  // automatic 是伺服器逾時專用權限，絕不能接受客戶端同名欄位繞過主要行動。
+  else if (intent.kind === "end_turn") result = room.game.endTurn(session.pid, { turnId: intent.turnId });
   else result = { ok: false, error: "未知操作" };
   const response = result.ok
     ? { type: "accepted", requestId }
@@ -452,21 +494,7 @@ async function handleAction(ws, message) {
   }
   sendJson(ws, response);
   broadcastRoom(room);
-  if (room.game.gameOver) {
-    try {
-      await saveMatch(room);
-      for (const pid of [1, 2]) {
-        const seat = room.players[pid];
-        if (seat?.connected) sendJson(seat.ws, { type: "match_log_saved", filename: path.basename(room.logPath) });
-      }
-    } catch (error) {
-      console.error("Failed to save match log", error);
-      for (const pid of [1, 2]) {
-        const seat = room.players[pid];
-        if (seat?.connected) sendJson(seat.ws, { type: "error", error: "終局戰報儲存失敗，請查看伺服器終端" });
-      }
-    }
-  }
+  await finalizeMatch(room);
 }
 
 const server = http.createServer(async (req, res) => {
@@ -522,6 +550,37 @@ wss.on("connection", ws => {
   ws.on("error", error => console.warn("WebSocket error", error.message));
 });
 
+async function processRoomTimeouts(now = Date.now()) {
+  const disconnectMs = GameEngine.timeoutRules().disconnectMs;
+  for (const room of rooms.values()) {
+    if (!room.game || room.game.gameOver) continue;
+
+    const disconnected = [1, 2]
+      .map(pid => ({ pid, seat: room.players[pid] }))
+      .filter(({ seat }) => seat && !seat.connected && Number.isFinite(seat.disconnectedAt))
+      .sort((a, b) => a.seat.disconnectedAt - b.seat.disconnectedAt || a.pid - b.pid);
+    const expired = disconnected.find(({ seat }) => now - seat.disconnectedAt >= disconnectMs);
+    if (expired) {
+      room.game.forfeit(expired.pid, "disconnect_timeout");
+      broadcastRoom(room);
+      await finalizeMatch(room);
+      continue;
+    }
+
+    syncTurnClock(room, now);
+    const result = room.game.checkTurnTimeout(now);
+    if (result?.ok) {
+      broadcastRoom(room);
+      await finalizeMatch(room);
+    }
+  }
+}
+
+// 250ms 只是伺服器檢查頻率；20／40 秒的正式規則仍只存在 game_engine.js。
+setInterval(() => {
+  processRoomTimeouts().catch(error => console.error("Failed to process game timeout", error));
+}, 250).unref();
+
 setInterval(() => {
   const now = Date.now();
   let lobbyChanged = false;
@@ -556,6 +615,6 @@ if (require.main === module) {
 }
 
 module.exports = {
-  server, wss, rooms, saveMatch, publicLobbyRooms, cleanLabel,
+  server, wss, rooms, saveMatch, publicLobbyRooms, cleanLabel, processRoomTimeouts,
   limits: { ROOM_NAME_MAX, NICKNAME_MAX, PASSWORD_MAX, PASSWORD_ATTEMPT_LIMIT, PASSWORD_ATTEMPT_WINDOW_MS },
 };

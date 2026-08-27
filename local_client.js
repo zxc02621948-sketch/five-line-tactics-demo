@@ -44,13 +44,25 @@
       turnReason: turnBlockReason(),
       remaining: player?.artillery,
       usedThisTurn: engine?.artilleryUsedThisTurn,
-      deploymentCommitted: engine?.deploymentCommitted,
     });
+  }
+  function endTurnReason() {
+    return UI.endTurnDisabledReason({
+      turnReason: turnBlockReason(),
+      deploymentCommitted: engine?.deploymentCommitted,
+      canAct: canAct(),
+    });
+  }
+  function placementBlockReason() {
+    return turnBlockReason() || (engine?.deploymentCommitted
+      ? "本回合已完成部署或移動，請炮擊或結束回合"
+      : "");
   }
   // 手牌用盡時的合法行動由引擎判定（移動一格），這裡只保留操作前的防呆。
   // 能不能行動一律問引擎：手牌用盡時還可以移動一格，兩者皆無時引擎會自動跳過。
   const canAct = () => Boolean(engine) && !finished() && engine.canAct(engine.current);
-  const moveMode = () => Boolean(engine) && !finished() && !engine.canDeploy(engine.current)
+  const moveMode = () => Boolean(engine) && !finished() && !engine.deploymentCommitted
+    && !engine.canDeploy(engine.current)
     && engine.legalMoves(engine.current).length > 0;
 
   function reset() {
@@ -125,7 +137,7 @@
     const cat = catalog();
     const counts = { sword: 0, shield: 0, spear: 0 };
     player.hand.forEach(type => counts[type]++);
-    const blocked = turnBlockReason();
+    const blocked = placementBlockReason();
 
     player.hand.forEach(type => {
       const button = document.createElement("button");
@@ -197,7 +209,7 @@
     if (artilleryPlan) { artilleryPlan = null; updateStatusText(); }
     let ghost = null;
     if (!engine.board[r][c]) {
-      if (!selectedType || !humanTurn()) return;
+      if (!selectedType || !humanTurn() || engine.deploymentCommitted) return;
       const stats = FiveLine.baseStats(selectedType, selectedRank);
       if (!stats) return;
       ghost = { r, c, unit: { id: -1, pid: engine.current, type: selectedType, rank: selectedRank,
@@ -241,7 +253,10 @@
     }
     turnText.className = activePid ? `turn p${activePid}t` : "turn";
     document.querySelector(".handPanel")?.classList.toggle("inactive-turn",
-      Boolean(engine && !finished() && mode === "pve" && engine.current === 2));
+      Boolean(engine && !finished()
+        && ((mode === "pve" && engine.current === 2) || engine.deploymentCommitted)));
+    turnSection?.classList.toggle("turn-ready",
+      Boolean(engine && !finished() && engine.deploymentCommitted && !turnBlockReason()));
   }
 
   function localReportText() {
@@ -331,6 +346,15 @@
     artilleryBtn.disabled = Boolean(disabledReason);
     artilleryBtn.title = disabledReason;
     artilleryBtn.className = `btn artBtn ${artilleryMode ? "active" : "ready"}`;
+    const endTurnBtn = $("#endTurnBtn");
+    const endDisabledReason = endTurnReason();
+    endTurnBtn.textContent = endDisabledReason
+      ? `結束回合｜${endDisabledReason}`
+      : "結束回合";
+    endTurnBtn.disabled = Boolean(endDisabledReason);
+    endTurnBtn.title = endDisabledReason;
+    endTurnBtn.className = `btn endTurnBtn ${endDisabledReason ? "" : "ready"}`.trim();
+    updateTurnTimer();
     renderSessionControls();
     renderResultOverlay();
     startPendingCombat();
@@ -342,12 +366,16 @@
       ? "按「重開」開始新的一局，或切換對戰模式。"
       : turnBlockReason()
         ? `操作暫停：${turnBlockReason()}。手牌與炮擊會在可操作時恢復。`
+      : engine.deploymentCommitted
+        ? engine.artilleryUsedThisTurn
+          ? "主要行動與炮擊已完成：請按「結束回合」。"
+          : "主要行動已完成：仍可炮擊，然後按「結束回合」。"
       : moveMode()
         ? (moveFrom
             ? `已選 (${moveFrom[0] + 1},${moveFrom[1] + 1})，點上下左右相鄰的空格移動。`
             : "手牌已用盡：本回合改為移動——點自己的一顆棋，再點相鄰空格。")
       : !canAct()
-        ? "本回合沒有手牌也沒有可移動的棋子，引擎會自動跳過。"
+        ? "目前已無法部署或移動，請按「結束回合」。"
       : artilleryMode ? (artilleryPlan
           ? `炮擊瞄準中：命中敵軍 ${artilleryPlan.enemies}、友軍 ${artilleryPlan.allies}`
             + `｜預計擊殺 ${artilleryPlan.kills}、誤殺友軍 ${artilleryPlan.losses}`
@@ -356,6 +384,22 @@
           : "先點手牌選擇兵種，再點棋盤空格部署。";
     $("#status").textContent = notice ? `${text}
 ${notice}` : text;
+  }
+
+  function updateTurnTimer() {
+    const timer = $("#turnTimer");
+    if (!timer) return;
+    if (!engine || finished()) {
+      timer.textContent = "—";
+      timer.className = "turnTimer";
+      timer.title = "";
+      return;
+    }
+    const clock = engine.turnClockState(Date.now());
+    const total = GameEngine.timeoutRules().turnMs;
+    timer.textContent = `${Math.ceil(clock.remainingMs / 1000)}s`;
+    timer.title = "本回合剩餘時間";
+    timer.className = `turnTimer ${clock.remainingMs <= total / 4 ? "urgent" : ""}`.trim();
   }
 
   // 對局進行中不顯示模式切換與重開，避免誤觸中斷戰鬥；改提供棄賽。
@@ -382,13 +426,17 @@ ${notice}` : text;
     notice = result.ok ? "" : result.error;
     if (result.ok) { selectedType = null; selectedRank = 1; hoverType = null; }
     render();
-    if (result.ok) scheduleAi();
     return result;
   }
 
   function onCell(r, c) {
     if (!humanTurn()) return;
     if (artilleryMode) { artilleryMode = false; act({ kind: "artillery", r, c }); return; }
+    if (engine.deploymentCommitted) {
+      notice = "主要行動已完成；現在仍可炮擊，或按「結束回合」。";
+      render();
+      return;
+    }
     if (moveMode()) {
       const unit = engine.board[r][c];
       if (unit && unit.pid === engine.current) { moveFrom = [r, c]; notice = ""; render(); return; }
@@ -398,7 +446,6 @@ ${notice}` : text;
       notice = result.ok ? "" : result.error;
       if (result.ok) { moveFrom = null; selectedType = null; }
       render();
-      if (result.ok) scheduleAi();
       return;
     }
     if (!selectedType) { notice = "請先選擇手牌"; render(); return; }
@@ -437,7 +484,15 @@ ${notice}` : text;
   function aiMove() {
     if (finished() || engine.current !== 2) { render(); return; }
     const player = engine.players[1];
-    if (!player.hand.length) { render(); return; }
+    if (!engine.canDeploy(2)) {
+      const move = engine.legalMoves(2)[0];
+      if (move) engine.move(2, {
+        r: move.from[0], c: move.from[1], toR: move.to[0], toC: move.to[1], turnId: engine.turnId,
+      });
+      engine.endTurn(2, { turnId: engine.turnId });
+      render();
+      return;
+    }
 
     let best = null, bestScore = -Infinity;
     for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
@@ -468,12 +523,21 @@ ${notice}` : text;
 
     const result = engine.deploy(2, { r, c, type, rank, turnId: engine.turnId });
     if (!result.ok) engine.deploy(2, { r, c, type, rank: 1, turnId: engine.turnId });
+    engine.endTurn(2, { turnId: engine.turnId });
     render();
   }
 
   // ---- 綁定 ----
   UI.wireRulesOverlay(catalog);
   $("#artilleryBtn").onclick = () => { if (humanTurn()) { artilleryMode = !artilleryMode; artilleryPlan = null; render(); } };
+  $("#endTurnBtn").onclick = () => {
+    if (endTurnReason()) return;
+    artilleryMode = false;
+    const result = engine.endTurn(engine.current, { turnId: engine.turnId });
+    notice = result.ok ? "" : result.error;
+    render();
+    if (result.ok) scheduleAi();
+  };
   $("#resetBtn").onclick = reset;
   $("#resultRematchBtn").onclick = reset;
   $("#resultLeaveBtn").onclick = () => {
@@ -510,5 +574,15 @@ ${notice}` : text;
   };
 
   $("#pveBtn").classList.add("active");
+  setInterval(() => {
+    if (!engine || finished()) { updateTurnTimer(); return; }
+    const result = engine.checkTurnTimeout(Date.now());
+    if (result?.ok) {
+      notice = "回合逾時，已自動結束回合。";
+      artilleryMode = false; selectedType = null; moveFrom = null;
+      render();
+      scheduleAi();
+    } else updateTurnTimer();
+  }, 250);
   reset();
 })();

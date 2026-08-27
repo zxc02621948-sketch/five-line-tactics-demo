@@ -8,7 +8,7 @@ const { baseStats } = require("../game_engine");
 
 const tempLogDir = fs.mkdtempSync(path.join(os.tmpdir(), "five-line-alpha-"));
 process.env.MATCH_LOG_DIR = tempLogDir;
-const { server, wss, rooms, limits } = require("../server");
+const { server, wss, rooms, limits, processRoomTimeouts } = require("../server");
 
 function client(url) {
   const ws = new WebSocket(url);
@@ -100,9 +100,15 @@ test("two sessions synchronize, preserve privacy, reject illegal actions, win, a
   assert.equal(fixedState1.state.firstPlayer, fixedFirst);
   fixedClients[fixedFirst].send({ type: "action", requestId: "fixed-first", intent: { kind: "deploy", r: 0, c: 0, type: fixedStates[fixedFirst].own.hand[0], rank: 1, turnId: fixedStates[fixedFirst].turnId } });
   await fixedClients[fixedFirst].wait(message => message.type === "accepted" && message.requestId === "fixed-first");
+  fixedClients[fixedFirst].send({ type: "action", requestId: "fixed-first-end",
+    intent: { kind: "end_turn", turnId: fixedStates[fixedFirst].turnId } });
+  await fixedClients[fixedFirst].wait(message => message.type === "accepted" && message.requestId === "fixed-first-end");
   const fixedSecondTurn = await fixedClients[fixedSecond].wait(message => message.type === "state" && message.state?.current === fixedSecond);
   fixedClients[fixedSecond].send({ type: "action", requestId: "fixed-second", intent: { kind: "deploy", r: 8, c: 8, type: fixedSecondTurn.state.own.hand[0], rank: 1, turnId: fixedSecondTurn.state.turnId } });
   await fixedClients[fixedSecond].wait(message => message.type === "accepted" && message.requestId === "fixed-second");
+  fixedClients[fixedSecond].send({ type: "action", requestId: "fixed-second-end",
+    intent: { kind: "end_turn", turnId: fixedSecondTurn.state.turnId } });
+  await fixedClients[fixedSecond].wait(message => message.type === "accepted" && message.requestId === "fixed-second-end");
   const fixedRound2 = await fixedClients[fixedFirst].wait(message => message.type === "state" && message.state?.roundNo === 2);
   assert.equal(fixedRound2.state.current, fixedFirst);
   assert.equal(fixedRound2.state.firstPlayer, fixedFirst);
@@ -111,14 +117,20 @@ test("two sessions synchronize, preserve privacy, reject illegal actions, win, a
   p2.ws.close();
   const disconnected = await p1.wait(message => message.type === "state" && message.status === "opponent_disconnected");
   assert.equal(disconnected.opponentConnected, false);
+  assert.equal(disconnected.state.turnClockPaused, true);
+  const pausedRemaining = disconnected.state.turnRemainingMs;
   p2 = client(url);
   await p2.open();
   p2.send({ type: "reconnect", roomCode: code, token: p2Session.token });
   await p2.wait(message => message.type === "session" && message.pid === 2);
-  await Promise.all([
+  const [reconnected1] = await Promise.all([
     p1.wait(message => message.type === "state" && message.status === "playing"),
     p2.wait(message => message.type === "state" && message.status === "playing"),
   ]);
+  assert.equal(reconnected1.state.turnClockPaused, false);
+  assert.ok(reconnected1.state.turnRemainingMs <= pausedRemaining
+    && reconnected1.state.turnRemainingMs >= pausedRemaining - 500,
+  "重連應續算斷線前剩餘時間，不得重置成完整 20 秒");
 
   p2.send({ type: "action", requestId: "wrong-turn", intent: { kind: "deploy", r: 8, c: 8, type: p2State.own.hand[0], rank: 1, turnId: p2State.turnId } });
   assert.match((await p2.wait(message => message.type === "rejected" && message.requestId === "wrong-turn")).error, /不是你的回合/);
@@ -130,12 +142,21 @@ test("two sessions synchronize, preserve privacy, reject illegal actions, win, a
   p1.send({ type: "action", requestId: "missing-card", intent: { kind: "deploy", r: 0, c: 0, type: impossible, rank: 2, turnId: p1State.turnId } });
   assert.match((await p1.wait(message => message.type === "rejected" && message.requestId === "missing-card")).error, /沒有足夠/);
 
+  p1.send({ type: "action", requestId: "forged-auto-end",
+    intent: { kind: "end_turn", turnId: p1State.turnId, automatic: true } });
+  assert.match((await p1.wait(message => message.type === "rejected"
+    && message.requestId === "forged-auto-end")).error, /請先完成部署或移動/,
+  "客戶端不得偽造 automatic 權限跳過主要行動");
+
   const p1Deploy = { type: "action", requestId: "p1-deploy", intent: { kind: "deploy", r: 4, c: 4, type: p1State.own.hand[0], rank: 1, turnId: p1State.turnId } };
   p1.send(p1Deploy);
   p1.send(p1Deploy);
   p1.send({ type: "action", requestId: "p1-rapid-second", intent: { kind: "deploy", r: 4, c: 3, type: p1State.own.hand[0], rank: 1, turnId: p1State.turnId } });
   await p1.wait(message => message.type === "accepted" && message.requestId === "p1-deploy");
-  assert.match((await p1.wait(message => message.type === "rejected" && message.requestId === "p1-rapid-second")).error, /操作已過期/);
+  assert.match((await p1.wait(message => message.type === "rejected" && message.requestId === "p1-rapid-second")).error,
+    /本回合已完成部署/);
+  p1.send({ type: "action", requestId: "p1-end", intent: { kind: "end_turn", turnId: p1State.turnId } });
+  await p1.wait(message => message.type === "accepted" && message.requestId === "p1-end");
   const p2Turn = await p2.wait(message => message.type === "state" && message.state?.current === 2);
   p2.send({ type: "action", requestId: "occupied", intent: { kind: "deploy", r: 4, c: 4, type: p2Turn.state.own.hand[0], rank: 1, turnId: p2Turn.state.turnId } });
   assert.match((await p2.wait(message => message.type === "rejected" && message.requestId === "occupied")).error, /已有單位/);
@@ -146,7 +167,10 @@ test("two sessions synchronize, preserve privacy, reject illegal actions, win, a
   p2.send({ type: "action", requestId: "p2-deploy", intent: { kind: "deploy", r: 8, c: 8, type: p2Turn.state.own.hand[0], rank: 1, turnId: p2Turn.state.turnId } });
   p2.send({ type: "action", requestId: "p2-rapid-second", intent: { kind: "deploy", r: 8, c: 7, type: p2Turn.state.own.hand[0], rank: 1, turnId: p2Turn.state.turnId } });
   await p2.wait(message => message.type === "accepted" && message.requestId === "p2-deploy");
-  assert.match((await p2.wait(message => message.type === "rejected" && message.requestId === "p2-rapid-second")).error, /操作已過期/);
+  assert.match((await p2.wait(message => message.type === "rejected" && message.requestId === "p2-rapid-second")).error,
+    /本回合已完成部署/);
+  p2.send({ type: "action", requestId: "p2-end", intent: { kind: "end_turn", turnId: p2Turn.state.turnId } });
+  await p2.wait(message => message.type === "accepted" && message.requestId === "p2-end");
   const [sync1, sync2] = await Promise.all([
     p1.wait(message => message.type === "state" && message.state?.roundNo === 2),
     p2.wait(message => message.type === "state" && message.state?.roundNo === 2),
@@ -164,6 +188,7 @@ test("two sessions synchronize, preserve privacy, reject illegal actions, win, a
   engine.turnId++;
   engine.artilleryUsedThisTurn = false;
   engine.deploymentCommitted = false;
+  engine.beginTurnClock();
   engine.gameOver = false;
   engine.winner = null;
   engine.ensureRoundRecord();
@@ -180,8 +205,14 @@ test("two sessions synchronize, preserve privacy, reject illegal actions, win, a
 
   p1.send({ type: "action", requestId: "winning-deploy", intent: { kind: "deploy", r: 0, c: 4, type: "sword", rank: 1, turnId: engine.turnId } });
   await p1.wait(message => message.type === "accepted" && message.requestId === "winning-deploy");
+  const winningTurn = engine.turnId;
+  p1.send({ type: "action", requestId: "winning-end", intent: { kind: "end_turn", turnId: winningTurn } });
+  await p1.wait(message => message.type === "accepted" && message.requestId === "winning-end");
   p2.send({ type: "action", requestId: "final-reply", intent: { kind: "deploy", r: 8, c: 8, type: "shield", rank: 1, turnId: engine.turnId } });
   await p2.wait(message => message.type === "accepted" && message.requestId === "final-reply");
+  const finalTurn = engine.turnId;
+  p2.send({ type: "action", requestId: "final-end", intent: { kind: "end_turn", turnId: finalTurn } });
+  await p2.wait(message => message.type === "accepted" && message.requestId === "final-end");
   const [end1, end2] = await Promise.all([
     p1.wait(message => message.type === "state" && message.state?.gameOver),
     p2.wait(message => message.type === "state" && message.state?.gameOver),
@@ -260,6 +291,12 @@ test("進行中的對局不准跳槽；結束後可用同一房再來一局；�
           type: engine.players[pid - 1].hand[0], rank: 1, turnId: engine.turnId } });
       const reply = await accepted;
       assert.equal(reply.type, "accepted", `第 ${round} 輪 P${pid} 部署應該成功：${reply.error || ""}`);
+      const endReply = player.wait(m => (m.type === "accepted" || m.type === "rejected")
+        && m.requestId === `q${round}-${pid}-end`);
+      player.send({ type: "action", requestId: `q${round}-${pid}-end`,
+        intent: { kind: "end_turn", turnId: engine.turnId } });
+      const ended = await endReply;
+      assert.equal(ended.type, "accepted", `第 ${round} 輪 P${pid} 結束回合應該成功：${ended.error || ""}`);
     }
   }
   assert.equal(game().gameOver, true, "連續 3 輪零交戰應該判消極雙敗");
@@ -381,4 +418,61 @@ test("階段三大廳只列等待房，保護密碼與 token，並限制密碼�
 
   observer.ws.close(); host.ws.close(); guest.ws.close(); attacker.ws.close();
   waitingHost.ws.close(); rateHost.ws.close();
+});
+
+test("階段四伺服器權威處理回合逾時、斷線暫停與 40 秒判離", async t => {
+  rooms.clear();
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    for (const socket of wss.clients) socket.close();
+    await new Promise(resolve => server.close(resolve));
+    rooms.clear();
+  });
+  const url = `ws://127.0.0.1:${server.address().port}/ws`;
+  const p1 = client(url), p2 = client(url);
+  await Promise.all([p1.open(), p2.open()]);
+
+  p1.send({ type: "create_room", nickname: "計時房主" });
+  const code = (await p1.wait(message => message.type === "session")).roomCode;
+  p2.send({ type: "join_room", roomCode: code, nickname: "計時來賓" });
+  await p2.wait(message => message.type === "session");
+  const [initial1, initial2] = await Promise.all([
+    p1.wait(message => message.type === "state" && message.state),
+    p2.wait(message => message.type === "state" && message.state),
+  ]);
+  assert.deepEqual(initial1.state.timeoutRules, { turnMs: 20_000, disconnectMs: 40_000 });
+  assert.deepEqual(initial2.state.timeoutRules, initial1.state.timeoutRules);
+  assert.equal(typeof initial1.serverNow, "number");
+  assert.ok(initial1.state.turnDeadline > initial1.serverNow);
+
+  const room = rooms.get(code);
+  const oldTurnId = room.game.turnId;
+  const forcedNow = Date.now() + 1_000;
+  room.game.turnDeadline = forcedNow;
+  await processRoomTimeouts(forcedNow);
+  const autoEnded = await p1.wait(message => message.type === "state"
+    && message.state?.turnId === oldTurnId + 1);
+  assert.equal(autoEnded.state.current, 2, "伺服器在截止時間自動交棒");
+  assert.ok(autoEnded.state.logs.some(entry => /回合逾時.*自動結束回合/.test(entry.text)));
+
+  p2.ws.close();
+  const disconnected = await p1.wait(message => message.type === "state"
+    && message.status === "opponent_disconnected");
+  const disconnectedAt = room.players[2].disconnectedAt;
+  const pausedRemaining = room.game.turnRemainingMs;
+  assert.equal(disconnected.state.turnClockPaused, true);
+  assert.equal(disconnected.state.turnDeadline, null);
+  assert.equal(disconnected.opponentDisconnectDeadline,
+    disconnectedAt + disconnected.state.timeoutRules.disconnectMs);
+
+  await processRoomTimeouts(disconnectedAt + 39_999);
+  assert.equal(room.game.gameOver, false, "40 秒前不得提早判離");
+  assert.equal(room.game.turnRemainingMs, pausedRemaining, "斷線等待不能偷吃回合時間");
+
+  await processRoomTimeouts(disconnectedAt + 40_000);
+  const finished = await p1.wait(message => message.type === "state" && message.state?.gameOver);
+  assert.equal(finished.state.winner, 1);
+  assert.equal(finished.state.endReason, "disconnect_timeout");
+  assert.equal(finished.state.forfeitedPlayer, 2);
+  assert.equal(finished.state.turnDeadline, null);
 });

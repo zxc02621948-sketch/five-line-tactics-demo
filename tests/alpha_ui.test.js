@@ -22,6 +22,7 @@ const stripComments = text => text.replace(/^\s*\/\/.*$/gm, "");
 
 const fixed = () => new GameEngine({ randomInt: () => 0, turnOrderMode: "fixed", startingPlayer: 1 });
 const intent = (engine, fields) => ({ ...fields, turnId: engine.turnId });
+const endTurn = (engine, pid = engine.current) => engine.endTurn(pid, intent(engine, {}));
 function bench() {
   const engine = fixed();
   engine.board = Array.from({ length: 9 }, () => Array(9).fill(null));
@@ -140,7 +141,9 @@ test("單機可實際部署並完成一輪戰鬥（雙方行動後才結算）",
   engine.players[1].hand = Array(5).fill("shield");
   assert.equal(engine.deploy(1, intent(engine, { r: 4, c: 4, type: "sword", rank: 1 })).ok, true);
   assert.equal(engine.combatResolutionCount, 0, "第一位部署後不得結算");
+  assert.equal(endTurn(engine, 1).ok, true);
   assert.equal(engine.deploy(2, intent(engine, { r: 4, c: 5, type: "shield", rank: 1 })).ok, true);
+  assert.equal(endTurn(engine, 2).ok, true);
   assert.equal(engine.combatResolutionCount, 1, "雙方行動後結算一次");
   assert.equal(engine.board[4][4].hp, 95);
   assert.equal(engine.board[4][5].hp, 124);      // 盾無減傷：160 - 36
@@ -194,7 +197,9 @@ test("單機也受同兵種★★唯一限制，且被擋時仍可出★", () =>
   engine.players[0].hand = Array(5).fill("sword");
   engine.players[1].hand = Array(5).fill("shield");
   assert.equal(engine.deploy(1, intent(engine, { r: 0, c: 0, type: "sword", rank: 2 })).ok, true);
+  assert.equal(endTurn(engine, 1).ok, true);
   assert.equal(engine.deploy(2, intent(engine, { r: 8, c: 8, type: "shield", rank: 1 })).ok, true);
+  assert.equal(endTurn(engine, 2).ok, true);
   engine.players[0].hand = Array(5).fill("sword");
   assert.equal(engine.deploy(1, intent(engine, { r: 0, c: 2, type: "sword", rank: 2 })).ok, false);
   assert.equal(engine.deploy(1, intent(engine, { r: 0, c: 2, type: "sword", rank: 1 })).ok, true);
@@ -356,6 +361,8 @@ test("有 hover 的裝置上，選取手牌不會把大卡釘住擋住棋盤", (
     assert.doesNotMatch(text, /hoverType \|\| selectedType/,
       `${name} 選取後不得無條件顯示大卡`);
   }
+  assert.match(client, /canAct:\s*state\?\.canAct/,
+    "連線端結束回合判斷必須讀伺服器狀態，不自行複製引擎規則");
   // 大卡是疊在棋盤上的 absolute 浮層，無論如何都不能吃掉點擊
   const block = css.match(/^\.cardDetail\s*\{[\s\S]*?\}/m);
   assert.ok(block, "找不到 .cardDetail 樣式");
@@ -745,8 +752,8 @@ test("警示條有固定佔位，不會因出現或消失擠壓其他元件", ()
   assert.ok(rows, "turnSection 必須用固定列高");
   // minmax(0, 1fr) 內部有空格，先把括號裡的空白收掉才數得對
   const tracks = rows[1].trim().replace(/\([^)]*\)/g, m => m.replace(/\s+/g, "")).split(/\s+/);
-  assert.equal(tracks.length, 7,
-    `多一列給警示條，共 7 列，實際是「${rows[1].trim()}」`);
+  assert.equal(tracks.length, 8,
+    `警示條與結束回合都有固定列，共 8 列，實際是「${rows[1].trim()}」`);
   assert.equal(tracks[2], "22px", "警示條那一列要有固定高度");
   // 空的時候完全透明，不畫空盒子
   assert.match(layoutCss, /\.phaseBadge\s*\{[^}]*background:\s*transparent[^}]*\}/s);
@@ -842,8 +849,12 @@ test("階段一：灰色操作直接顯示原因，炮擊原因兩端共用", ()
   assert.equal(AlphaUI.artilleryDisabledReason({ turnReason: "不是你的回合", remaining: 2 }), "不是你的回合");
   assert.equal(AlphaUI.artilleryDisabledReason({ remaining: 0 }), "本場炮擊已用完");
   assert.equal(AlphaUI.artilleryDisabledReason({ remaining: 1, usedThisTurn: true }), "本回合已使用炮擊");
-  assert.equal(AlphaUI.artilleryDisabledReason({ remaining: 1, deploymentCommitted: true }),
-    "已完成部署，炮擊只能在部署前使用");
+  assert.equal(AlphaUI.artilleryDisabledReason({ remaining: 1, deploymentCommitted: true }), "",
+    "部署後仍可炮擊");
+  assert.equal(AlphaUI.endTurnDisabledReason({ deploymentCommitted: false }), "請先部署或移動");
+  assert.equal(AlphaUI.endTurnDisabledReason({ deploymentCommitted: true }), "");
+  assert.equal(AlphaUI.endTurnDisabledReason({ deploymentCommitted: false, canAct: false }), "",
+    "炮擊後若已無法部署或移動，仍要讓玩家立即結束回合");
   assert.equal(AlphaUI.rankDisabledReason({ count: 2, cost: 3 }), "需要 3 張，目前只有 2 張");
   for (const [name, text] of [["local_client.js", localClient], ["alpha_client.js", client]]) {
     assert.match(text, /UI\.artilleryDisabledReason\(/, `${name} 必須使用共用炮擊原因`);
@@ -998,4 +1009,36 @@ test("階段三：手機直向可用且所有重要資訊都不依賴 hover", ()
     "房卡用點擊加入，不能只靠 hover");
   assert.match(client, /artilleryButton\.textContent = disabledReason/,
     "炮擊停用原因直接顯示在按鈕上");
+});
+
+/* ---------------- UX 規格階段四 ---------------- */
+
+test("階段四：明確結束回合、醒目提示與權威逾時在兩端共用", () => {
+  for (const [name, page] of [["index.html", localHtml], ["alpha.html", html]]) {
+    assert.ok(page.includes('id="endTurnBtn"'), `${name} 缺少結束回合按鈕`);
+    assert.ok(page.includes('id="turnTimer"'), `${name} 缺少固定回合倒數槽位`);
+  }
+  for (const [name, text] of [["local_client.js", localClient], ["alpha_client.js", client]]) {
+    assert.match(text, /endTurnDisabledReason\(/, `${name} 必須直接顯示不能結束的原因`);
+    assert.match(text, /deploymentCommitted[\s\S]*?仍可炮擊[\s\S]*?結束回合/,
+      `${name} 必須在主要行動後引導炮擊或結束回合`);
+    assert.match(text, /\.classList\.toggle\("turn-ready"/,
+      `${name} 完成主要行動後必須讓玩家資訊區發亮`);
+  }
+  assert.match(shellCss, /\.endTurnBtn\.ready:not\(:disabled\)[\s\S]*?animation:endTurnPulse/,
+    "可結束時按鈕必須主動脈動提示");
+  assert.match(shellCss, /@media \(prefers-reduced-motion:reduce\)/,
+    "必須尊重減少動態效果的系統設定");
+  assert.match(layoutCss, /grid-template-rows:\s*335px 112px minmax\(0, 1fr\)/,
+    "單機側欄必須為新增按鈕保留高度，不能讓它被固定 section 裁掉");
+  assert.match(sharedUi, /GameEngine[\s\S]*?timeoutRules\(\)/,
+    "規則視窗的秒數必須向引擎讀取");
+  assert.match(server, /GameEngine\.timeoutRules\(\)\.disconnectMs/,
+    "伺服器斷線判離秒數必須向引擎讀取");
+  assert.match(server, /room\.game\.checkTurnTimeout\(Date\.now\(\)\)/,
+    "伺服器收到操作前必須先仲裁回合是否已到期");
+
+  const strippedClients = stripComments(`${localClient}\n${client}\n${server}`);
+  assert.doesNotMatch(strippedClients, /\b20_?000\b|\b40_?000\b/,
+    "20／40 秒只能定義在 game_engine.js，其他端不得各抄一份");
 });

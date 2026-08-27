@@ -434,7 +434,7 @@
   min-height: 0;
   padding: 9px 11px;
   display: grid;
-  grid-template-columns: 42px minmax(110px, .8fr) minmax(165px, 1fr) minmax(180px, 1.2fr) auto minmax(150px, .75fr);
+  grid-template-columns: 42px minmax(110px, .8fr) minmax(165px, 1fr) minmax(180px, 1.2fr) auto minmax(260px, 1.3fr);
   grid-template-rows: minmax(0, 1fr);
   align-items: center;
   gap: 10px;
@@ -517,10 +517,21 @@
   gap: 6px;
 }
 
-.selfBand .artBtn {
+.turnActions {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px;
+}
+
+.selfBand .artBtn,
+.selfBand .endTurnBtn {
   width: 100%;
   height: 58px;
   margin: 0;
+  overflow: hidden;
+  line-height: 1.2;
+  white-space: normal;
 }
 
 .onlineSide {
@@ -540,7 +551,7 @@
   .roomList { grid-template-columns: minmax(0, 1fr); }
   .onlineGameLayout { grid-template-columns: minmax(0, 1fr) 210px; }
   .selfBand.turnSection {
-    grid-template-columns: 40px minmax(92px, .7fr) minmax(145px, 1fr) minmax(155px, 1.15fr) auto minmax(125px, .7fr);
+    grid-template-columns: 40px minmax(92px, .7fr) minmax(145px, 1fr) minmax(155px, 1.15fr) auto minmax(220px, 1fr);
     gap: 7px;
   }
 }
@@ -571,7 +582,7 @@
     grid-template-rows: 60px min(94vw, 72vh) 112px 188px;
   }
   .selfBand.turnSection {
-    grid-template-columns: 38px minmax(90px, .7fr) minmax(150px, 1fr) minmax(140px, 1fr) auto minmax(120px, .65fr);
+    grid-template-columns: 38px minmax(90px, .7fr) minmax(150px, 1fr) minmax(140px, 1fr) auto minmax(210px, .9fr);
     grid-template-rows: minmax(0, 1fr);
   }
   .onlineSide {
@@ -621,9 +632,12 @@
     min-width: 0;
     flex: 1;
   }
-  .selfBand .artBtn {
+  .selfBand .turnActions {
     grid-column: 3 / 5;
     grid-row: 2;
+  }
+  .selfBand .artBtn,
+  .selfBand .endTurnBtn {
     height: 56px;
   }
   .selfBand .playerAvatar { width: 34px; height: 34px; }

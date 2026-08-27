@@ -231,7 +231,9 @@ body {
 .side {
   padding: 10px;
   display: grid;
-  grid-template-rows: 282px 112px minmax(0, 1fr);
+  /* 第四階段多一列固定高度的「結束回合」。335px 正好保留原本各列與說明槽，
+     不讓新按鈕溢出後被 section 的 overflow 裁掉。 */
+  grid-template-rows: 335px 112px minmax(0, 1fr);
   gap: 9px;
   overflow: hidden;
 }
@@ -250,7 +252,7 @@ body {
   display: grid;
   /* 多一列 22px 給加賽／消極警示條。這一列永遠存在，沒有警示時是空的，
      不會因為出現或消失而把下面的東西擠上擠下。 */
-  grid-template-rows: 20px 28px 22px 42px 40px 47px minmax(0, 1fr);
+  grid-template-rows: 20px 28px 22px 42px 40px 47px 47px minmax(0, 1fr);
   gap: 6px;
 }
 
@@ -342,11 +344,18 @@ body {
 
 .actionStatus,
 .artilleryStatus,
-.artBtn {
+.artBtn,
+.endTurnBtn {
   margin-top: 0;
 }
 
 .artBtn {
+  overflow: hidden;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+.endTurnBtn {
   overflow: hidden;
   line-height: 1.25;
   white-space: normal;
@@ -510,7 +519,7 @@ body {
   .side {
     height: 620px;
     margin: 0;
-    grid-template-rows: 282px 112px minmax(0, 1fr);
+    grid-template-rows: 335px 112px minmax(0, 1fr);
   }
 
   .cardDetail {

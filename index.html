@@ -61,12 +61,16 @@
     <div class="side">
       <div class="section turnSection">
         <h3>目前回合</h3>
-        <div id="turnText" class="turn" aria-live="polite"></div>
+        <div class="turnLine">
+          <div id="turnText" class="turn" aria-live="polite"></div>
+          <div id="turnTimer" class="turnTimer" aria-live="off">—</div>
+        </div>
         <div id="phaseBadge" class="phaseBadge"></div>
         <div id="status" class="status actionStatus"></div>
         <div id="artilleryOverview" class="status artilleryStatus"></div>
         <button id="artilleryBtn" class="btn artBtn ready">炮擊（本場剩 2 發）</button>
-        <div class="note">炮擊是部署前的額外戰術行動，每回合最多 1 次；炮擊後仍必須正常部署。3×3 範圍敵我皆傷：中心 30、外圈 12。</div>
+        <button id="endTurnBtn" class="btn endTurnBtn" type="button" disabled>結束回合｜請先部署或移動</button>
+        <div class="note">炮擊可在部署／移動之前或之後使用，但不取代主要行動；範圍與傷害以引擎規則為準。</div>
         <div id="testSummary" class="combatPreview" style="display:none;margin-top:8px"></div>
       </div>
 

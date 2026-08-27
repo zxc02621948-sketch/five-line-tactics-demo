@@ -145,7 +145,10 @@
             <span id="selfRole">玩家</span>
           </div>
           <div class="bandTurn">
-            <div id="turnText" class="turn" aria-live="polite"></div>
+            <div class="turnLine">
+              <div id="turnText" class="turn" aria-live="polite"></div>
+              <div id="turnTimer" class="turnTimer" aria-live="off">—</div>
+            </div>
             <div id="phaseBadge" class="phaseBadge"></div>
           </div>
           <div id="turnStatus" class="status actionStatus bandActionStatus"></div>
@@ -153,7 +156,10 @@
             <div class="bandStat"><span>手牌</span><strong id="selfHandCount">—</strong></div>
             <div class="bandStat"><span>炮擊</span><strong id="selfArtillery">—</strong></div>
           </div>
-          <button id="artilleryBtn" class="btn artBtn ready" disabled>炮擊</button>
+          <div class="turnActions">
+            <button id="artilleryBtn" class="btn artBtn ready" disabled>炮擊</button>
+            <button id="endTurnBtn" class="btn endTurnBtn" type="button" disabled>結束回合</button>
+          </div>
         </div>
 
         <div class="handPanel">

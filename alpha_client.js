@@ -27,6 +27,8 @@
   let roomInfo = null;
   let lobbyRooms = [];
   let lobbyClockDelta = 0;
+  let gameClockDelta = 0;
+  let opponentDisconnectDeadline = null;
   let pendingJoinCode = null;
   let pendingJoinName = "";
   let state = null;
@@ -136,6 +138,8 @@
         $("#directPasswordInput").value = "";
       } else if (message.type === "state") {
         const previousTurnId = state?.turnId;
+        gameClockDelta = Date.now() - Number(message.serverNow || Date.now());
+        opponentDisconnectDeadline = Number(message.opponentDisconnectDeadline) || null;
         roomCode = message.roomCode;
         selfPid = message.selfPid;
         opponentConnected = message.opponentConnected;
@@ -149,13 +153,15 @@
         if (!state?.gameOver) resultReportOpen = false;
         if (!state || state.current !== selfPid || state.turnId !== previousTurnId) {
           selectedType = null; selectedRank = 1; artilleryMode = false; moveFrom = null;
+        } else if (state.deploymentCommitted) {
+          selectedType = null; selectedRank = 1; moveFrom = null;
         }
       } else if (message.type === "rejected" || message.type === "error") {
         clearPendingRequest();
         pendingTimedOut = false;
         if (message.errorCode === "reconnect_failed") {
           roomCode = null; selfPid = null; state = null; roomStatus = "none"; roomInfo = null;
-          opponentConnected = false;
+          opponentConnected = false; opponentDisconnectDeadline = null;
           combatPlayback.reset(); combatMatchId = null; lastCombatId = null; pendingCombat = null;
           try { localStorage.removeItem(sessionKey()); }
           catch { /* 無儲存權限時沒有舊工作階段可移除 */ }
@@ -172,7 +178,8 @@
       } else if (message.type === "left") {
         // 主動離開：把本機的房間狀態清乾淨，才不會拿舊房的 state 去比對新的 selfPid
         roomCode = null; selfPid = null; state = null; roomStatus = null; roomInfo = null;
-        opponentConnected = false; rematchState = { self: false, opponent: false };
+        opponentConnected = false; opponentDisconnectDeadline = null;
+        rematchState = { self: false, opponent: false };
         clearPendingRequest(); pendingTimedOut = false;
         artilleryMode = false; selectedType = null;
         resultReportOpen = false;
@@ -191,7 +198,7 @@
   // 手牌用盡且場上還有棋子可以走時，本回合改為移動。
   // 連線端沒有引擎實例，從 state.board 自行推導（規則參數仍取自 state.movementRules）。
   function moveMode() {
-    if (!state || state.gameOver || state.own.hand.length > 0) return false;
+    if (!state || state.gameOver || state.deploymentCommitted || state.own.hand.length > 0) return false;
     return legalMovesFromState().length > 0;
   }
   function legalMovesFromState() {
@@ -228,8 +235,21 @@
       turnReason: turnBlockReason(),
       remaining: state?.artillery?.[selfPid],
       usedThisTurn: state?.artilleryUsedThisTurn,
-      deploymentCommitted: state?.deploymentCommitted,
     });
+  }
+
+  function endTurnReason() {
+    return UI.endTurnDisabledReason({
+      turnReason: turnBlockReason(),
+      deploymentCommitted: state?.deploymentCommitted,
+      canAct: state?.canAct,
+    });
+  }
+
+  function placementBlockReason() {
+    return turnBlockReason() || (state?.deploymentCommitted
+      ? "本回合已完成部署或移動，請炮擊或結束回合"
+      : "");
   }
 
   function rematchControl() {
@@ -255,6 +275,11 @@
     if (artilleryMode) {
       artilleryMode = false;
       sendIntent({ kind: "artillery", r, c });
+      return;
+    }
+    if (state.deploymentCommitted) {
+      notice = "主要行動已完成；現在仍可炮擊，或按「結束回合」。";
+      render();
       return;
     }
     if (moveMode()) {
@@ -343,7 +368,7 @@
     const counts = { sword: 0, shield: 0, spear: 0 };
     state.own.hand.forEach(type => counts[type]++);
     const cat = catalog();
-    const blocked = turnBlockReason();
+    const blocked = placementBlockReason();
     state.own.hand.forEach(type => {
       const button = document.createElement("button");
       button.className = `card ${selectedType === type ? "sel" : ""}`;
@@ -405,7 +430,7 @@
     let ghost = null;
     if (!board[r][c]) {
       const stats = globalThis.FiveLineEngine?.baseStats(selectedType, selectedRank);
-      if (!selectedType || !ownTurn() || !stats) return;
+      if (!selectedType || !ownTurn() || state.deploymentCommitted || !stats) return;
       ghost = { r, c, unit: { id: -1, pid: selfPid, type: selectedType, rank: selectedRank,
         cards: selectedRank === 2 ? 3 : 1, hp: stats.maxHp, maxHp: stats.maxHp, atk: stats.atk } };
     }
@@ -455,7 +480,10 @@
     }
     turnText.className = activePid ? `turn p${activePid}t` : "turn";
     handPanel?.classList.toggle("inactive-turn",
-      Boolean(state && !state.gameOver && state.current !== selfPid));
+      Boolean(state && !state.gameOver && (state.current !== selfPid || state.deploymentCommitted)));
+    const readyToEnd = Boolean(state && !state.gameOver && state.current === selfPid
+      && state.deploymentCommitted && !turnBlockReason());
+    selfBand?.classList.toggle("turn-ready", readyToEnd);
   }
 
   function onlineReportText() {
@@ -508,6 +536,42 @@
     const element = $(selector);
     element.textContent = connected ? "伺服器已連線" : "伺服器未連線";
     element.className = `connection ${connected ? "ok" : "bad"}`;
+  }
+
+  function authoritativeNow() {
+    return Date.now() - gameClockDelta;
+  }
+
+  function updateTurnTimer() {
+    const timer = $("#turnTimer");
+    if (!timer) return;
+    if (!state || state.gameOver) {
+      timer.textContent = "—";
+      timer.className = "turnTimer";
+      timer.title = "";
+      return;
+    }
+
+    let remaining;
+    let total;
+    if (!opponentConnected && opponentDisconnectDeadline) {
+      remaining = Math.max(0, opponentDisconnectDeadline - authoritativeNow());
+      total = state.timeoutRules?.disconnectMs;
+      timer.textContent = `離場 ${Math.ceil(remaining / 1000)}s`;
+      timer.title = "對手斷線逾時倒數；回合計時目前暫停";
+      $("#opponentConnectionText").textContent = `已斷線｜剩 ${Math.ceil(remaining / 1000)} 秒`;
+    } else if (state.turnClockPaused) {
+      timer.textContent = "暫停";
+      timer.title = "回合計時暫停";
+      timer.className = "turnTimer";
+      return;
+    } else {
+      remaining = Math.max(0, Number(state.turnDeadline) - authoritativeNow());
+      total = state.timeoutRules?.turnMs;
+      timer.textContent = `${Math.ceil(remaining / 1000)}s`;
+      timer.title = "本回合剩餘時間";
+    }
+    timer.className = `turnTimer ${total && remaining <= total / 4 ? "urgent" : ""}`.trim();
   }
 
   function relativeAge(createdAt) {
@@ -658,6 +722,7 @@
     if (seated && !inGame) renderWaitingRoom();
     if (!state) {
       $("#resultOverlay").classList.add("hidden");
+      updateTurnTimer();
       return;
     }
 
@@ -687,9 +752,15 @@
     const actionText = state.gameOver
       ? UI.resultLabel(state)
       : blocked ? `操作暫停：${blocked}。手牌與炮擊會在可操作時恢復。`
+      : state.current === selfPid && state.deploymentCommitted
+        ? state.artilleryUsedThisTurn
+          ? "主要行動與炮擊已完成：請按「結束回合」。"
+          : "主要行動已完成：仍可炮擊，然後按「結束回合」。"
       : state.current === selfPid && moveMode()
         ? (moveFrom ? `已選 (${moveFrom[0] + 1},${moveFrom[1] + 1})，點相鄰空格移動`
             : "手牌已用盡：本回合改為移動，點自己的一顆棋再點相鄰空格")
+      : state.current === selfPid && state.canAct === false
+        ? "目前已無法部署或移動：請按「結束回合」。"
       : state.current === selfPid
         ? state.artilleryUsedThisTurn ? "輪到你：炮擊已使用，必須完成部署" : "輪到你：可先炮擊，然後部署"
       : "等待對方完成操作";
@@ -701,6 +772,15 @@
     artilleryButton.disabled = Boolean(disabledReason);
     artilleryButton.title = disabledReason;
     artilleryButton.className = `btn art artBtn ${artilleryMode ? "active" : "ready"}`;
+    const endTurnButton = $("#endTurnBtn");
+    const endDisabledReason = endTurnReason();
+    endTurnButton.textContent = endDisabledReason
+      ? `結束回合｜${endDisabledReason}`
+      : "結束回合";
+    endTurnButton.disabled = Boolean(endDisabledReason);
+    endTurnButton.title = endDisabledReason;
+    endTurnButton.className = `btn endTurnBtn ${endDisabledReason ? "" : "ready"}`.trim();
+    updateTurnTimer();
     renderResultOverlay();
     startPendingCombat();
   }
@@ -763,6 +843,12 @@
     if (event.key === "Escape") closePasswordPrompt();
   });
   $("#artilleryBtn").onclick = () => { if (ownTurn()) { artilleryMode = !artilleryMode; selectedType = null; render(); } };
+  $("#endTurnBtn").onclick = () => {
+    if (!endTurnReason()) {
+      artilleryMode = false;
+      sendIntent({ kind: "end_turn" });
+    }
+  };
   const requestRematch = () => { if (!rematchControl().disabled) send({ type: "rematch" }); };
   const leaveRoom = () => { if (connected && roomCode) send({ type: "leave_room" }); };
   $("#leaveWaitingBtn").onclick = leaveRoom;
@@ -777,6 +863,7 @@
   setInterval(() => {
     if (!roomCode && !state) renderLobbyRooms();
   }, 30_000);
+  setInterval(updateTurnTimer, 250);
   render();
   connect();
 })();

@@ -77,8 +77,14 @@
     return engine && engine.overtimeRules ? engine.overtimeRules() : null;
   }
 
+  function liveTimeoutRules() {
+    const engine = globalThis.FiveLineEngine && globalThis.FiveLineEngine.GameEngine;
+    return engine && engine.timeoutRules ? engine.timeoutRules() : null;
+  }
+
   function rulesHtml(catalog) {
     const ot = liveOvertimeRules();
+    const timeouts = liveTimeoutRules();
     const row = type => {
       const info = catalog[type], one = info.ranks[1];
       return `<tr><td>${ICONS[type]} ${info.name}</td><td>${one.maxHp}／${one.atk}</td>`
@@ -122,7 +128,10 @@
 
       <h3>回合流程</h3>
       <ul>
-        <li>每回合雙方各部署 1 顆棋。</li>
+        <li>每回合雙方各部署 1 顆棋；手牌用盡時則依規則移動 1 格。</li>
+        <li>完成部署／移動後仍可使用炮擊，最後按<b>結束回合</b>交棒。</li>
+        ${timeouts ? `<li>每回合有 <b>${timeouts.turnMs / 1000} 秒</b>；逾時由伺服器自動結束。`
+          + `斷線時暫停回合倒數，<b>${timeouts.disconnectMs / 1000} 秒</b>未重連則判離。</li>` : ""}
         <li>兩人都行動完後，一次結算全場戰鬥。</li>
         <li>戰鬥順序：主攻擊與護衛轉移　→　主傷害與移除陣亡　→　★★劍斬入／追擊　→　★★盾反震。</li>
       </ul>
@@ -164,7 +173,7 @@
       <h3>炮擊</h3>
       <ul>
         <li>每人整場 <b>2 發</b>。</li>
-        <li>只能在自己<b>部署之前</b>使用，每回合最多 1 發；用完仍然必須完成部署。</li>
+        <li>每回合最多 1 發，可在部署／移動<b>之前或之後</b>使用；炮擊不取代本回合的主要行動。</li>
         <li>以指定格為中心的 3×3 範圍：<b>中心 30 點</b>、外圈 8 格<b>各 12 點</b>。</li>
         <li><b>會誤傷自己的單位</b>，範圍內不分敵我。</li>
       </ul>`;
@@ -697,7 +706,6 @@
   }
 
   // 單機與連線共用的終局文案；endReason 由權威引擎提供，避免兩端各自猜測。
-  // 單機與連線共用的終局文案；endReason 由權威引擎提供，避免兩端各自猜測。
   function resultLabel(view) {
     if (!view || !view.gameOver) return "";
     if (view.winner === "double_loss") return "消極對局：雙方棄賽";
@@ -723,6 +731,9 @@
         ? `P${view.winner} 在加賽戰鬥結算後維持五連；棋盤金框標示致勝五顆。`
         : `P${view.winner} 在戰鬥結算後維持五連；棋盤金框標示致勝五顆。`;
     }
+    if (view.endReason === "disconnect_timeout") {
+      return `P${view.forfeitedPlayer} 斷線超過規定時間，判定離場；P${view.winner} 獲勝。`;
+    }
     return "對局已由引擎完成判定。";
   }
 
@@ -739,11 +750,16 @@
   }
 
   // 按鈕停用原因只整理伺服器／引擎已給的狀態，不複製任何規則數值。
-  function artilleryDisabledReason({ turnReason = "", remaining, usedThisTurn, deploymentCommitted }) {
+  function artilleryDisabledReason({ turnReason = "", remaining, usedThisTurn }) {
     if (turnReason) return turnReason;
     if (remaining <= 0) return "本場炮擊已用完";
     if (usedThisTurn) return "本回合已使用炮擊";
-    if (deploymentCommitted) return "已完成部署，炮擊只能在部署前使用";
+    return "";
+  }
+
+  function endTurnDisabledReason({ turnReason = "", deploymentCommitted = false, canAct = true }) {
+    if (turnReason) return turnReason;
+    if (!deploymentCommitted && canAct) return "請先部署或移動";
     return "";
   }
 
@@ -760,6 +776,6 @@
     autoSizeBoard, forecast, focusOn, drawForecast, forecastArtillery, drawArtillery,
     hasCombatPlayback, createCombatPlayback,
     matchPhaseLabel, resultLabel, resultReasonLabel, finalFiveOwner,
-    artilleryDisabledReason, rankDisabledReason,
+    artilleryDisabledReason, endTurnDisabledReason, rankDisabledReason,
   };
 })();
