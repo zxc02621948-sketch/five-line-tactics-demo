@@ -14,10 +14,14 @@ const NICKNAME_MAX = 16;
 const PASSWORD_MAX = 32;
 const PASSWORD_ATTEMPT_WINDOW_MS = 60_000;
 const PASSWORD_ATTEMPT_LIMIT = 5;
+const ROOM_CREATE_WINDOW_MS = 60_000;
+const ROOM_CREATE_LIMIT = 5;
+const ROOM_CAPACITY = 500;
 const ROOT = __dirname;
 const LOG_DIR = process.env.MATCH_LOG_DIR ? path.resolve(process.env.MATCH_LOG_DIR) : path.join(ROOT, "match_logs");
 const rooms = new Map();
 const passwordAttempts = new Map();
+const roomCreateAttempts = new Map();
 
 const STATIC_FILES = new Map([
   ["/", ["alpha.html", "text/html; charset=utf-8"]],
@@ -148,6 +152,26 @@ function notePasswordFailure(ws, code) {
 
 function clearPasswordFailures(ws, code) {
   passwordAttempts.delete(passwordAttemptKey(ws, code));
+}
+
+// 建房限流以連線來源為單位；只記成功建立的房間，避免無效請求本身擴張記憶體。
+// 全站房間硬上限是第二層保護，避免分散來源繞過單一來源限制。
+function roomCreateKey(ws) {
+  return ws?._socket?.remoteAddress || "unknown";
+}
+
+function recentRoomCreates(ws, now = Date.now()) {
+  const key = roomCreateKey(ws);
+  const recent = (roomCreateAttempts.get(key) || []).filter(time => now - time < ROOM_CREATE_WINDOW_MS);
+  if (recent.length) roomCreateAttempts.set(key, recent);
+  else roomCreateAttempts.delete(key);
+  return { key, recent };
+}
+
+function noteRoomCreate(ws, now = Date.now()) {
+  const { key, recent } = recentRoomCreates(ws, now);
+  recent.push(now);
+  roomCreateAttempts.set(key, recent);
 }
 
 function roomCode() {
@@ -299,6 +323,18 @@ function detachPreviousSession(ws, releaseSeat = false) {
 
 function createRoom(ws, message = {}) {
   if (blockIfInLiveGame(ws)) return;
+  const now = Date.now();
+  const { recent } = recentRoomCreates(ws, now);
+  if (recent.length >= ROOM_CREATE_LIMIT) {
+    const retryAfterMs = Math.max(1, ROOM_CREATE_WINDOW_MS - (now - recent[0]));
+    return sendJson(ws, { type: "error", errorCode: "room_create_rate_limited", retryAfterMs,
+      error: "開房太頻繁，請稍後再試" });
+  }
+  if (rooms.size >= ROOM_CAPACITY) {
+    return sendJson(ws, { type: "error", errorCode: "room_capacity_reached",
+      error: "目前房間數已達伺服器上限，請稍後再試" });
+  }
+  // 所有限制都通過後才離開舊房；被拒絕時玩家不會失去原本座位。
   detachPreviousSession(ws, true);
   const code = roomCode();
   const nickname = cleanNickname(message.nickname);
@@ -313,11 +349,12 @@ function createRoom(ws, message = {}) {
     createdBy: nickname,
     players: { 1: newSeat(1, ws, nickname), 2: null },
     game: null,
-    createdAt: Date.now(),
-    lastActivity: Date.now(),
+    createdAt: now,
+    lastActivity: now,
     logSaved: false,
   };
   rooms.set(code, room);
+  noteRoomCreate(ws, now);
   attachSocket(ws, room, 1);
   broadcastRoom(room);
   broadcastLobby();
@@ -528,6 +565,11 @@ const server = http.createServer(async (req, res) => {
 });
 
 const wss = new WebSocketServer({ server, path: "/ws", maxPayload: 16 * 1024 });
+// 同一 Node 程序在測試或維護時重新啟動 server，不沿用上一輪的短期限流狀態。
+server.on("close", () => {
+  roomCreateAttempts.clear();
+  passwordAttempts.clear();
+});
 wss.on("connection", ws => {
   sendJson(ws, { type: "hello", message: "五連戰線 Alpha WebSocket 已連線" });
   sendLobby(ws);
@@ -596,6 +638,11 @@ setInterval(() => {
     if (recent.length) passwordAttempts.set(key, recent);
     else passwordAttempts.delete(key);
   }
+  for (const [key, attempts] of roomCreateAttempts) {
+    const recent = attempts.filter(time => now - time < ROOM_CREATE_WINDOW_MS);
+    if (recent.length) roomCreateAttempts.set(key, recent);
+    else roomCreateAttempts.delete(key);
+  }
   if (lobbyChanged) broadcastLobby();
 }, 60_000).unref();
 
@@ -616,5 +663,6 @@ if (require.main === module) {
 
 module.exports = {
   server, wss, rooms, saveMatch, publicLobbyRooms, cleanLabel, processRoomTimeouts,
-  limits: { ROOM_NAME_MAX, NICKNAME_MAX, PASSWORD_MAX, PASSWORD_ATTEMPT_LIMIT, PASSWORD_ATTEMPT_WINDOW_MS },
+  limits: { ROOM_NAME_MAX, NICKNAME_MAX, PASSWORD_MAX, PASSWORD_ATTEMPT_LIMIT, PASSWORD_ATTEMPT_WINDOW_MS,
+    ROOM_CREATE_LIMIT, ROOM_CREATE_WINDOW_MS, ROOM_CAPACITY },
 };
