@@ -25,6 +25,23 @@
   .btn:hover{background:#30394a}
   .btn.active{outline:2px solid var(--warn)}
   .btn.danger{border-color:#8c2e2e}
+  .turnLine{min-width:0;display:flex;align-items:center;gap:8px}
+  .turnLine .turn{flex:1}
+  .turnTimer{
+    flex:0 0 auto;min-width:42px;color:var(--muted);font-size:13px;font-weight:800;
+    font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap
+  }
+  .turnTimer.urgent{color:var(--danger);text-shadow:0 0 12px rgba(255,89,100,.5)}
+  @keyframes endTurnPulse{
+    0%,100%{box-shadow:0 0 0 0 rgba(255,212,59,.26)}
+    50%{box-shadow:0 0 0 5px rgba(255,212,59,0),0 0 18px rgba(255,212,59,.52)}
+  }
+  .endTurnBtn.ready:not(:disabled){
+    border-color:var(--warn);background:#5b4913;color:#fff4bd;font-weight:800;
+    animation:endTurnPulse 1.15s ease-in-out infinite
+  }
+  .turnSection.turn-ready{border-color:rgba(255,212,59,.92)!important}
+  @media (prefers-reduced-motion:reduce){.endTurnBtn.ready:not(:disabled){animation:none}}
   .layout{
     min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(310px,24vw);
     gap:12px;overflow:hidden;

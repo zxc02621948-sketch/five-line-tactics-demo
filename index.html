@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>五連戰線 - 最小原型</title>
 <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="/alpha_board.css?v=15">
+  <link rel="stylesheet" href="/alpha_board.css?v=18">
 <meta name="theme-color" content="#0e1117">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 
-  <link rel="stylesheet" href="/game_shell.css?v=15">
-<link rel="stylesheet" href="/local_layout.css?v=15">
+  <link rel="stylesheet" href="/game_shell.css?v=16">
+<link rel="stylesheet" href="/local_layout.css?v=18">
 
 </head>
 <body>
@@ -22,7 +22,6 @@
     <button class="btn" id="pveBtn">對電腦</button>
     <button class="btn" id="pvpBtn">本機雙人</button>
     <button class="btn danger" id="resetBtn">重開</button>
-    <button class="btn danger hidden" id="resignBtn" type="button">棄賽</button>
     <button class="btn" id="fullscreenBtn">全螢幕</button>
     <span class="pill">9×9</span>
     <span class="pill">25 張循環牌組</span>
@@ -37,6 +36,14 @@
       <div class="boardWrap">
         <div id="board" class="board"></div>
         <svg id="forecastLayer" class="forecastLayer" aria-hidden="true"></svg>
+        <div id="combatStage" class="combatStage hidden">
+          <svg id="combatLayer" class="combatLayer" aria-hidden="true"></svg>
+          <div id="combatPieces" class="combatPieces" aria-hidden="true"></div>
+          <div class="combatPlaybackHud">
+            <span id="combatStepLabel" class="combatStepLabel" aria-live="polite"></span>
+            <button id="skipCombatBtn" class="btn skipCombatBtn" type="button">跳過演出</button>
+          </div>
+        </div>
       </div>
       <div class="handPanel">
         <div class="handHeader">
@@ -53,12 +60,16 @@
     <div class="side">
       <div class="section turnSection">
         <h3>目前回合</h3>
-        <div id="turnText" class="turn"></div>
+        <div class="turnLine">
+          <div id="turnText" class="turn" aria-live="polite"></div>
+          <div id="turnTimer" class="turnTimer" aria-live="off">—</div>
+        </div>
         <div id="phaseBadge" class="phaseBadge"></div>
         <div id="status" class="status actionStatus"></div>
         <div id="artilleryOverview" class="status artilleryStatus"></div>
         <button id="artilleryBtn" class="btn artBtn ready">炮擊（本場剩 2 發）</button>
-        <div class="note">炮擊是部署前的額外戰術行動，每回合最多 1 次；炮擊後仍必須正常部署。3×3 範圍敵我皆傷：中心 30、外圈 12。</div>
+        <button id="endTurnBtn" class="btn endTurnBtn" type="button" disabled>結束回合｜請先部署或移動</button>
+        <div class="note">炮擊可在部署／移動之前或之後使用，但不取代主要行動；範圍與傷害以引擎規則為準。</div>
         <div id="testSummary" class="combatPreview" style="display:none;margin-top:8px"></div>
       </div>
 
@@ -67,11 +78,29 @@
         <div id="preview" class="combatPreview">點手牌可看兵種詳情；規則按鈕可看完整說明。</div>
       </div>
 
-      <div class="section logSection">
-        <h3>戰報</h3>
-        <div id="log" class="log"></div>
-      </div>
     </div>
+  </div>
+
+  <details id="matchMenu" class="matchMenu">
+    <summary class="btn matchMenuSummary">⋯ 對局選單</summary>
+    <div class="matchMenuPanel">
+      <button id="logDrawerToggle" class="btn" type="button"
+        aria-controls="logDrawer" aria-expanded="false">戰鬥紀錄</button>
+      <button class="btn danger hidden" id="resignBtn" type="button">棄賽</button>
+    </div>
+  </details>
+
+  <div id="logDrawer" class="logDrawer hidden" aria-hidden="true">
+    <aside class="logDrawerPanel logSection" role="dialog" aria-modal="true" aria-labelledby="logDrawerTitle">
+      <div class="logDrawerHead">
+        <div>
+          <span class="drawerEyebrow">本局事件</span>
+          <h2 id="logDrawerTitle">戰鬥紀錄</h2>
+        </div>
+        <button id="logDrawerClose" class="btn" type="button">關閉</button>
+      </div>
+      <div id="log" class="log" aria-live="polite"></div>
+    </aside>
   </div>
 </div>
 
@@ -82,6 +111,20 @@
       <button id="rulesCloseBtn" class="btn" type="button">關閉</button>
     </div>
     <div id="rulesBody" class="rulesBody"></div>
+  </div>
+</div>
+
+<div id="resultOverlay" class="overlay resultOverlay hidden" role="dialog" aria-modal="true" aria-labelledby="resultTitle">
+  <div class="overlayBox resultBox">
+    <div class="resultEyebrow">對局結束</div>
+    <h2 id="resultTitle"></h2>
+    <p id="resultReason" class="resultReason"></p>
+    <div class="resultActions">
+      <button id="resultRematchBtn" class="btn resultPrimary" type="button">再來一局</button>
+      <button id="resultLeaveBtn" class="btn" type="button">返回模式選擇</button>
+      <button id="resultReportBtn" class="btn" type="button" aria-expanded="false">看戰報</button>
+    </div>
+    <div id="resultReport" class="resultReport hidden" aria-live="polite"></div>
   </div>
 </div>
 

@@ -10,6 +10,10 @@ function intent(engine, fields) {
   return { ...fields, turnId: engine.turnId };
 }
 
+function endTurn(engine, pid = engine.current) {
+  return engine.endTurn(pid, intent(engine, {}));
+}
+
 test("visible state contains only the requesting player's hand", () => {
   const engine = game();
   engine.players[0].hand = ["sword", "shield"];
@@ -32,6 +36,7 @@ test("server engine rejects wrong turn, nonexistent cards, and occupied cells", 
   assert.match(engine.deploy(2, intent(engine, { r: 8, c: 8, type: "shield", rank: 1 })).error, /不是你的回合/);
   assert.match(engine.deploy(1, intent(engine, { r: 0, c: 0, type: "spear", rank: 1 })).error, /沒有足夠/);
   assert.equal(engine.deploy(1, intent(engine, { r: 0, c: 0, type: "sword", rank: 1 })).ok, true);
+  assert.equal(endTurn(engine, 1).ok, true);
   assert.match(engine.deploy(2, intent(engine, { r: 0, c: 0, type: "shield", rank: 1 })).error, /已有單位/);
 });
 
@@ -46,12 +51,137 @@ test("artillery is limited, does not consume deployment, and cannot be chained",
   assert.match(engine.artillery(1, intent(engine, { r: 4, c: 4 })).error, /最多使用一次/);
   assert.match(engine.deploy(2, intent(engine, { r: 8, c: 8, type: "shield", rank: 1 })).error, /不是你的回合/);
   assert.equal(engine.deploy(1, intent(engine, { r: 0, c: 0, type: "sword", rank: 1 })).ok, true);
+  assert.equal(endTurn(engine, 1).ok, true);
   assert.equal(engine.deploy(2, intent(engine, { r: 8, c: 8, type: "shield", rank: 1 })).ok, true);
+  assert.match(engine.deploy(2, intent(engine, { r: 8, c: 6, type: "shield", rank: 1 })).error,
+    /本回合已完成部署/);
+  assert.equal(endTurn(engine, 2).ok, true);
   assert.equal(engine.deploy(2, intent(engine, { r: 8, c: 6, type: "shield", rank: 1 })).ok, true);
+  assert.equal(engine.artillery(2, intent(engine, { r: 7, c: 7 })).ok, true,
+    "部署後仍然可以炮擊");
+  assert.equal(endTurn(engine, 2).ok, true);
   assert.equal(engine.artillery(1, intent(engine, { r: 7, c: 7 })).ok, true);
   assert.equal(engine.players[0].artillery, 0);
   assert.equal(engine.deploy(1, intent(engine, { r: 0, c: 2, type: "sword", rank: 1 })).ok, true);
-  assert.match(engine.artillery(1, intent(engine, { r: 4, c: 4 })).error, /已用完/);
+  assert.match(engine.artillery(1, intent(engine, { r: 4, c: 4 })).error, /最多使用一次|已用完/);
+});
+
+test("階段四：部署後不換人，仍可炮擊，最後由玩家明確結束回合", () => {
+  let now = 1_000;
+  const engine = new GameEngine({
+    matchId: "manual-end-turn",
+    roomCode: "PHASE4",
+    randomInt: () => 0,
+    turnOrderMode: "fixed",
+    startingPlayer: 1,
+    now: () => now,
+  });
+  engine.players[0].hand = Array(5).fill("sword");
+  engine.players[1].hand = Array(5).fill("shield");
+  const originalTurnId = engine.turnId;
+
+  assert.match(engine.endTurn(1, { turnId: originalTurnId }).error, /請先完成部署或移動/);
+  assert.equal(engine.deploy(1, {
+    r: 0, c: 0, type: "sword", rank: 1, turnId: originalTurnId,
+  }).ok, true);
+  assert.equal(engine.current, 1, "部署只提交主要行動，不得自動交棒");
+  assert.equal(engine.turnId, originalTurnId, "部署後同一張回合票仍可用於炮擊與結束回合");
+  assert.equal(engine.deploymentCommitted, true);
+  assert.equal(engine.artillery(1, { r: 4, c: 4, turnId: originalTurnId }).ok, true,
+    "部署完成後仍可使用本回合炮擊");
+
+  now = 6_000;
+  assert.equal(engine.endTurn(1, { turnId: originalTurnId }).ok, true);
+  assert.equal(engine.current, 2);
+  assert.equal(engine.turnId, originalTurnId + 1);
+  assert.equal(engine.deploymentCommitted, false);
+  assert.equal(engine.artilleryUsedThisTurn, false);
+  assert.equal(engine.turnDeadline, now + GameEngine.timeoutRules().turnMs,
+    "新回合倒數必須從交棒時重新給完整時間");
+});
+
+test("階段四：20 秒到期會自動結束回合，即使玩家完全沒有行動", () => {
+  let now = 10_000;
+  const engine = new GameEngine({
+    matchId: "turn-timeout",
+    roomCode: "TIME20",
+    randomInt: () => 0,
+    turnOrderMode: "fixed",
+    startingPlayer: 1,
+    now: () => now,
+  });
+  assert.deepEqual(GameEngine.timeoutRules(), { turnMs: 20_000, disconnectMs: 40_000 });
+  const rulesCopy = GameEngine.timeoutRules();
+  rulesCopy.turnMs = 1;
+  assert.equal(GameEngine.timeoutRules().turnMs, 20_000, "外部不得改寫引擎唯一的逾時規則");
+
+  now += 19_999;
+  assert.equal(engine.checkTurnTimeout(), null, "截止前 1ms 不得提早交棒");
+  now += 1;
+  const result = engine.checkTurnTimeout();
+  assert.equal(result.ok, true);
+  assert.equal(result.automatic, true);
+  assert.equal(engine.current, 2);
+  assert.equal(engine.actionsThisRound, 1, "逾時視為本輪該玩家的回合已完成");
+  assert.ok(engine.logs.some(entry => /回合逾時.*自動結束回合/.test(entry.text)));
+  assert.deepEqual(engine.visibleStateFor(1).timeoutRules, GameEngine.timeoutRules());
+});
+
+test("階段四：斷線會凍結剩餘回合時間，重連後續算而非重置", () => {
+  let now = 50_000;
+  const engine = new GameEngine({
+    matchId: "paused-turn",
+    roomCode: "PAUSE4",
+    randomInt: () => 0,
+    turnOrderMode: "fixed",
+    startingPlayer: 1,
+    now: () => now,
+  });
+
+  now += 5_000;
+  engine.pauseTurnClock();
+  assert.deepEqual(engine.turnClockState(), {
+    deadline: null,
+    paused: true,
+    remainingMs: 15_000,
+  });
+  now += 100_000;
+  assert.equal(engine.checkTurnTimeout(), null, "斷線暫停期間不得吃掉回合時間");
+
+  engine.resumeTurnClock();
+  assert.equal(engine.turnDeadline, now + 15_000, "重連只續算原本剩餘時間");
+  now += 14_999;
+  assert.equal(engine.checkTurnTimeout(), null);
+  now += 1;
+  assert.equal(engine.checkTurnTimeout().automatic, true);
+  assert.equal(engine.current, 2);
+});
+
+test("階段四：炮擊若消滅最後可移動棋子，玩家仍可立即結束回合", () => {
+  const engine = new GameEngine({
+    matchId: "artillery-no-action",
+    roomCode: "NOACT4",
+    randomInt: () => 0,
+    turnOrderMode: "fixed",
+    startingPlayer: 1,
+  });
+  engine.board = Array.from({ length: 9 }, () => Array(9).fill(null));
+  const stats = baseStats("shield", 1);
+  engine.board[4][4] = {
+    id: 99, pid: 1, type: "shield", rank: 1, cards: 1,
+    hp: 1, maxHp: stats.maxHp, atk: stats.atk,
+  };
+  engine.players[0].hand = [];
+  engine.players[0].deck = [];
+  assert.equal(engine.canAct(1), true, "炮擊前仍可移動唯一棋子");
+  assert.equal(engine.artillery(1, { r: 4, c: 4, turnId: engine.turnId }).ok, true);
+  assert.equal(engine.canAct(1), false, "炮擊誤殺後已無主要行動可做");
+  assert.equal(engine.visibleStateFor(1).canAct, false,
+    "連線 UI 必須直接讀引擎判斷，不自行重算合法行動");
+  assert.equal(engine.deploymentCommitted, false);
+  assert.equal(engine.endTurn(1, { turnId: engine.turnId }).ok, true,
+    "不得強迫玩家空等到 20 秒逾時");
+  assert.equal(engine.current, 2);
 });
 
 test("each server-issued turn permits only one deployment, including artillery and round boundaries", () => {
@@ -61,17 +191,22 @@ test("each server-issued turn permits only one deployment, including artillery a
 
   const p1Turn = engine.turnId;
   assert.equal(engine.deploy(1, { r: 0, c: 0, type: "sword", rank: 1, turnId: p1Turn }).ok, true);
+  assert.match(engine.deploy(1, { r: 0, c: 1, type: "sword", rank: 1, turnId: p1Turn }).error,
+    /本回合已完成部署/);
+  assert.equal(engine.endTurn(1, { turnId: p1Turn }).ok, true);
   assert.match(engine.deploy(1, { r: 0, c: 1, type: "sword", rank: 1, turnId: p1Turn }).error, /操作已過期/);
 
   const p2Turn = engine.turnId;
   assert.equal(engine.deploy(2, { r: 8, c: 8, type: "shield", rank: 1, turnId: p2Turn }).ok, true);
+  assert.equal(engine.endTurn(2, { turnId: p2Turn }).ok, true);
   assert.equal(engine.current, 2, "P2 is also first next round under the frozen initiative rule");
   assert.match(engine.deploy(2, { r: 8, c: 7, type: "shield", rank: 1, turnId: p2Turn }).error, /操作已過期/);
 
   const nextP2Turn = engine.turnId;
   assert.equal(engine.artillery(2, { r: 4, c: 4, turnId: nextP2Turn }).ok, true);
   assert.equal(engine.deploy(2, { r: 8, c: 7, type: "shield", rank: 1, turnId: nextP2Turn }).ok, true);
-  assert.match(engine.deploy(2, { r: 8, c: 6, type: "shield", rank: 1, turnId: nextP2Turn }).error, /操作已過期/);
+  assert.match(engine.deploy(2, { r: 8, c: 6, type: "shield", rank: 1, turnId: nextP2Turn }).error,
+    /本回合已完成部署/);
   assert.equal(engine.board.flat().filter(Boolean).length, 3);
 });
 
@@ -89,7 +224,9 @@ test("fixed-order mode keeps the randomly selected starter first in every round"
   engine.players[0].hand = Array(5).fill("sword");
   engine.players[1].hand = Array(5).fill("shield");
   assert.equal(engine.deploy(2, intent(engine, { r: 8, c: 8, type: "shield", rank: 1 })).ok, true);
+  assert.equal(endTurn(engine, 2).ok, true);
   assert.equal(engine.deploy(1, intent(engine, { r: 0, c: 0, type: "sword", rank: 1 })).ok, true);
+  assert.equal(endTurn(engine, 1).ok, true);
   assert.equal(engine.roundNo, 2);
   assert.equal(engine.current, 2);
   assert.equal(engine.visibleStateFor(1).firstPlayer, 2);
@@ -103,7 +240,9 @@ test("combat resolves once after both deployments", () => {
   engine.players[0].hand = ["sword"];
   engine.players[1].hand = ["shield"];
   engine.deploy(1, intent(engine, { r: 4, c: 4, type: "sword", rank: 1 }));
+  endTurn(engine, 1);
   engine.deploy(2, intent(engine, { r: 4, c: 5, type: "shield", rank: 1 }));
+  endTurn(engine, 2);
   assert.ok(engine.roundRecords[0].combat);
   assert.equal(engine.logs.filter(item => item.text.includes("由伺服器結算一次")).length, 1);
   assert.equal(engine.board[4][4].hp, 95);
@@ -127,6 +266,7 @@ test("elite deployments conserve all 25 cards under the one-per-type cap", () =>
     const rank = placed[pid] === 0 ? 2 : 1;              // 第一手★★劍，之後只能出★劍
     const result = engine.deploy(pid, intent(engine, { r, c, type: "sword", rank }));
     assert.equal(result.ok, true, result.error);
+    assert.equal(endTurn(engine, pid).ok, true);
     placed[pid]++;
     assert.equal(engine.cardDistribution(1).total, 25);
     assert.equal(engine.cardDistribution(2).total, 25);
@@ -243,6 +383,7 @@ test("沒牌又沒有合法移動時自動跳過該回合，而不是判輸", ()
   assert.equal(engine.canAct(2), false);
 
   assert.equal(engine.deploy(1, { r: 4, c: 4, type: "shield", rank: 1, turnId: engine.turnId }).ok, true);
+  assert.equal(endTurn(engine, 1).ok, true);
   assert.equal(engine.gameOver, false, "無法行動的一方不判輸");
   assert.equal(engine.winner, null);
   assert.ok(engine.logs.some(entry => /跳過本回合/.test(entry.text)), "要留下跳過紀錄");

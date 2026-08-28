@@ -20,17 +20,49 @@
   let notice = "";
   let aiThinking = false;
   let resigned = null;                 // 棄賽者的 pid；棄賽只影響本機顯示，不動引擎規則
+  let resultReportOpen = false;
+  let resultOverlayDismissed = false;
+  let lastCombatId = null;
+  let pendingCombat = null;
 
   const catalog = () => GameEngine.unitCatalog();
   const finished = () => Boolean(resigned) || (engine && engine.gameOver);
   // 對局已開始 ＝ 盤面上有棋子。開始後就不該還能自由切換模式。
   const started = () => Boolean(engine) && engine.board.some(row => row.some(Boolean));
-  const humanTurn = () => engine && !finished() && !aiThinking
+  const humanTurn = () => engine && !finished() && !aiThinking && !pendingCombat && !combatPlayback.active()
     && (mode === "pvp" || engine.current === 1);
+  function turnBlockReason() {
+    if (!engine) return "等待遊戲建立";
+    if (finished()) return "本局已結束";
+    if (pendingCombat || combatPlayback.active()) return "戰鬥演出中";
+    if (aiThinking || (mode === "pve" && engine.current === 2)) return "電腦正在行動";
+    return "";
+  }
+  function artilleryReason() {
+    const player = engine?.players?.[engine.current - 1];
+    return UI.artilleryDisabledReason({
+      turnReason: turnBlockReason(),
+      remaining: player?.artillery,
+      usedThisTurn: engine?.artilleryUsedThisTurn,
+    });
+  }
+  function endTurnReason() {
+    return UI.endTurnDisabledReason({
+      turnReason: turnBlockReason(),
+      deploymentCommitted: engine?.deploymentCommitted,
+      canAct: canAct(),
+    });
+  }
+  function placementBlockReason() {
+    return turnBlockReason() || (engine?.deploymentCommitted
+      ? "本回合已完成部署或移動，請炮擊或結束回合"
+      : "");
+  }
   // 手牌用盡時的合法行動由引擎判定（移動一格），這裡只保留操作前的防呆。
   // 能不能行動一律問引擎：手牌用盡時還可以移動一格，兩者皆無時引擎會自動跳過。
   const canAct = () => Boolean(engine) && !finished() && engine.canAct(engine.current);
-  const moveMode = () => Boolean(engine) && !finished() && !engine.canDeploy(engine.current)
+  const moveMode = () => Boolean(engine) && !finished() && !engine.deploymentCommitted
+    && !engine.canDeploy(engine.current)
     && engine.legalMoves(engine.current).length > 0;
 
   function reset() {
@@ -38,6 +70,8 @@
     engine = new GameEngine({ roomCode: "LOCAL1", ...ALPHA_TURN_ORDER });
     selectedType = null; selectedRank = 1; hoverType = null;
     artilleryMode = false; moveFrom = null; notice = ""; aiThinking = false; resigned = null;
+    resultReportOpen = false; resultOverlayDismissed = false;
+    combatPlayback.reset(); lastCombatId = null; pendingCombat = null;
     render();
     scheduleAi();
   }
@@ -45,6 +79,29 @@
   // ---- 顯示 ----
   // 每次重繪都依當下容器重算棋盤尺寸，不倚賴 ResizeObserver 的觸發時機
   const sizeBoard = UI.autoSizeBoard(document.querySelector("#board"), document.querySelector(".boardWrap"));
+  const combatPlayback = UI.createCombatPlayback({
+    boardEl: $("#board"),
+    stageEl: $("#combatStage"),
+    svgEl: $("#combatLayer"),
+    piecesEl: $("#combatPieces"),
+    labelEl: $("#combatStepLabel"),
+    skipButton: $("#skipCombatBtn"),
+    onFinish: () => render(),
+  });
+
+  function syncCombatCue() {
+    const next = engine?.lastCombatPresentation();
+    if (!next || next.id === lastCombatId || next.id === pendingCombat?.id) return;
+    pendingCombat = next;
+  }
+
+  function startPendingCombat() {
+    if (!pendingCombat || combatPlayback.active()) return;
+    const next = pendingCombat;
+    pendingCombat = null;
+    lastCombatId = next.id;
+    if (!combatPlayback.play(next)) renderResultOverlay();
+  }
 
   function renderBoard() {
     sizeBoard();
@@ -53,10 +110,13 @@
     for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
       const cell = document.createElement("div");
       cell.className = "cell";
+      const finalOwner = engine.gameOver ? UI.finalFiveOwner(engine, r, c) : 0;
+      if (finalOwner) cell.classList.add(`final-five-p${finalOwner}`);
       const unit = engine.board[r][c];
       if (unit) {
         const div = document.createElement("div");
         div.className = `unit p${unit.pid}`;
+        div.dataset.unitId = String(unit.id);
         div.innerHTML = UI.unitHtml(unit);
         div.title = UI.unitTitle(unit);
         cell.appendChild(div);
@@ -77,11 +137,13 @@
     const cat = catalog();
     const counts = { sword: 0, shield: 0, spear: 0 };
     player.hand.forEach(type => counts[type]++);
+    const blocked = placementBlockReason();
 
     player.hand.forEach(type => {
       const button = document.createElement("button");
       button.className = `card ${selectedType === type ? "sel" : ""}`;
-      button.disabled = !humanTurn();
+      button.disabled = Boolean(blocked);
+      button.title = blocked;
       button.innerHTML = UI.handCardHtml(type, cat);
       button.onclick = () => { selectedType = type; selectedRank = 1; artilleryMode = false; render(); };
       button.addEventListener("mouseenter", () => { hoverType = type; renderCardDetail(); });
@@ -103,10 +165,13 @@
       for (const [rank, cost] of [[1, 1], [2, 3]]) {
         const button = document.createElement("button");
         const capped = rank === 2 && eliteOut;
+        const reason = UI.rankDisabledReason({ turnReason: blocked, count: counts[selectedType], cost,
+          capped, typeName: NAMES[selectedType] });
         button.className = `btn ${selectedRank === rank ? "active" : ""}`;
-        button.textContent = capped ? `★★（場上已有${NAMES[selectedType]}）` : `${"★".repeat(rank)}（${cost}張）`;
-        button.disabled = !humanTurn() || counts[selectedType] < cost || capped;
-        button.title = capped ? "同兵種★★同時只能有一隻，等它陣亡後才能再合成" : "";
+        button.textContent = capped ? `★★（場上已有${NAMES[selectedType]}）`
+          : reason ? `${"★".repeat(rank)}｜${reason}` : `${"★".repeat(rank)}（${cost}張）`;
+        button.disabled = Boolean(reason);
+        button.title = reason;
         button.onclick = () => { selectedRank = rank; render(); };
         $("#rankRow").appendChild(button);
       }
@@ -127,6 +192,7 @@
     const boardEl = $("#board");
     if (!layer || !boardEl || !engine) return;
     layer.innerHTML = "";
+    if (pendingCombat || combatPlayback.active()) return;
     if (!hoverCell) {                        // 移開瞄準格時要把統計一起清掉
       if (artilleryPlan) { artilleryPlan = null; updateStatusText(); }
       return;
@@ -143,7 +209,7 @@
     if (artilleryPlan) { artilleryPlan = null; updateStatusText(); }
     let ghost = null;
     if (!engine.board[r][c]) {
-      if (!selectedType || !humanTurn()) return;
+      if (!selectedType || !humanTurn() || engine.deploymentCommitted) return;
       const stats = FiveLine.baseStats(selectedType, selectedRank);
       if (!stats) return;
       ghost = { r, c, unit: { id: -1, pid: engine.current, type: selectedType, rank: selectedRank,
@@ -176,12 +242,77 @@
     }
   }
 
+  function renderTurnVisual() {
+    const activePid = engine && !finished() ? Number(engine.current) : 0;
+    const turnSection = document.querySelector(".turnSection");
+    const turnText = $("#turnText");
+    const boardEl = $("#board");
+    for (const pid of [1, 2]) {
+      turnSection?.classList.toggle(`active-p${pid}`, activePid === pid);
+      boardEl.classList.toggle(`active-p${pid}`, activePid === pid);
+    }
+    turnText.className = activePid ? `turn p${activePid}t` : "turn";
+    document.querySelector(".handPanel")?.classList.toggle("inactive-turn",
+      Boolean(engine && !finished()
+        && ((mode === "pve" && engine.current === 2) || engine.deploymentCommitted)));
+    turnSection?.classList.toggle("turn-ready",
+      Boolean(engine && !finished() && engine.deploymentCommitted && !turnBlockReason()));
+  }
+
+  function localReportText() {
+    const artilleryRounds = pid => engine.artilleryEvents
+      .filter(item => item.pid === pid)
+      .map(item => item.round);
+    const cards = pid => engine.cardDistribution(pid);
+    const cardLine = (label, item) => `${label} 牌庫 ${item.deck}／手牌 ${item.hand}`
+      + `／冷卻 ${item.cooldown}／場上綁定 ${item.boardBoundCards}／總數 ${item.total}`
+      + `${item.valid ? "" : " ⚠"}`;
+    return `最終輪數：${engine.roundNo}\n`
+      + `P1 炮擊輪數：${artilleryRounds(1).join("、") || "未使用"}\n`
+      + `P2 炮擊輪數：${artilleryRounds(2).join("、") || "未使用"}\n`
+      + `剩餘炮擊：P1 ${engine.players[0].artillery}／P2 ${engine.players[1].artillery}\n`
+      + `${cardLine("P1 卡片", cards(1))}\n${cardLine("P2 卡片", cards(2))}`;
+  }
+
+  function renderResultOverlay() {
+    const overlay = $("#resultOverlay");
+    if (!finished() || resultOverlayDismissed || pendingCombat || combatPlayback.active()) {
+      overlay.classList.add("hidden");
+      if (!finished()) resultReportOpen = false;
+      return;
+    }
+    const winner = resigned ? 3 - resigned : engine.winner;
+    const box = overlay.querySelector(".resultBox");
+    box.classList.remove("result-p1", "result-p2", "result-neutral");
+    box.classList.add(winner === 1 ? "result-p1" : winner === 2 ? "result-p2" : "result-neutral");
+    $("#resultTitle").textContent = resigned
+      ? `P${winner} 獲勝`
+      : UI.resultLabel(engine);
+    $("#resultReason").textContent = resigned
+      ? `P${resigned} 已棄賽，本局由 P${winner} 獲勝。`
+      : UI.resultReasonLabel(engine);
+    $("#resultRematchBtn").disabled = false;
+    $("#resultRematchBtn").textContent = "再來一局";
+    $("#resultLeaveBtn").disabled = false;
+    $("#resultLeaveBtn").textContent = "返回模式選擇";
+
+    const report = $("#resultReport");
+    const reportButton = $("#resultReportBtn");
+    report.textContent = localReportText();
+    report.classList.toggle("hidden", !resultReportOpen);
+    reportButton.setAttribute("aria-expanded", String(resultReportOpen));
+    reportButton.textContent = resultReportOpen ? "收起戰報" : "看戰報";
+    overlay.classList.remove("hidden");
+  }
+
   function render() {
     if (!engine) return;
-    renderBoard();
+    syncCombatCue();
+    if (!combatPlayback.active()) renderBoard();
     renderHand();
     renderLogs();
     renderForecast();
+    renderTurnVisual();
     const owner = mode === "pve" && engine.current === 2 ? "P2（電腦）" : `P${engine.current}`;
     const winnerLabel = resigned
       ? `P${resigned} 棄賽｜P${3 - resigned} 獲勝`
@@ -200,30 +331,51 @@
     badge.className = `phaseBadge ${phase.level === "none" ? "" : phase.level}`.trim();
     badge.title = phase.full || phase.text; }
     $("#turnText").textContent = finished()
-      ? winnerLabel
-      : `第 ${engine.roundNo} 輪｜${owner} 行動｜${engine.actionsThisRound === 0 ? "先手" : "後手"}`;
+      ? "對局結束"
+      : `輪到 ${owner}｜第 ${engine.roundNo} 輪`;
+    $("#turnText").title = finished() ? winnerLabel
+      : `${owner} ${engine.actionsThisRound === 0 ? "先手" : "後手"}`;
     updateStatusText();
     $("#artilleryOverview").textContent =
       `炮擊資源｜P1：${engine.players[0].artillery} 發｜P2：${engine.players[1].artillery} 發`;
     const artilleryBtn = $("#artilleryBtn");
     const me = engine.players[engine.current - 1];
-    artilleryBtn.textContent = `炮擊（本回合方剩 ${me.artillery} 發）`;
-    artilleryBtn.disabled = !humanTurn() || me.artillery <= 0
-      || engine.artilleryUsedThisTurn || engine.deploymentCommitted;
+    const artilleryBase = `炮擊（本回合方剩 ${me.artillery} 發）`;
+    const disabledReason = artilleryReason();
+    artilleryBtn.textContent = disabledReason ? `${artilleryBase}｜${disabledReason}` : artilleryBase;
+    artilleryBtn.disabled = Boolean(disabledReason);
+    artilleryBtn.title = disabledReason;
     artilleryBtn.className = `btn artBtn ${artilleryMode ? "active" : "ready"}`;
+    const endTurnBtn = $("#endTurnBtn");
+    const endDisabledReason = endTurnReason();
+    endTurnBtn.textContent = endDisabledReason
+      ? `結束回合｜${endDisabledReason}`
+      : "結束回合";
+    endTurnBtn.disabled = Boolean(endDisabledReason);
+    endTurnBtn.title = endDisabledReason;
+    endTurnBtn.className = `btn endTurnBtn ${endDisabledReason ? "" : "ready"}`.trim();
+    updateTurnTimer();
     renderSessionControls();
+    renderResultOverlay();
+    startPendingCombat();
   }
 
   // 狀態文字獨立出來：炮擊瞄準時 renderForecast 會算出命中統計，需要單獨刷新。
   function updateStatusText() {
     const text = finished()
       ? "按「重開」開始新的一局，或切換對戰模式。"
+      : turnBlockReason()
+        ? `操作暫停：${turnBlockReason()}。手牌與炮擊會在可操作時恢復。`
+      : engine.deploymentCommitted
+        ? engine.artilleryUsedThisTurn
+          ? "主要行動與炮擊已完成：請按「結束回合」。"
+          : "主要行動已完成：仍可炮擊，然後按「結束回合」。"
       : moveMode()
         ? (moveFrom
             ? `已選 (${moveFrom[0] + 1},${moveFrom[1] + 1})，點上下左右相鄰的空格移動。`
             : "手牌已用盡：本回合改為移動——點自己的一顆棋，再點相鄰空格。")
       : !canAct()
-        ? "本回合沒有手牌也沒有可移動的棋子，引擎會自動跳過。"
+        ? "目前已無法部署或移動，請按「結束回合」。"
       : artilleryMode ? (artilleryPlan
           ? `炮擊瞄準中：命中敵軍 ${artilleryPlan.enemies}、友軍 ${artilleryPlan.allies}`
             + `｜預計擊殺 ${artilleryPlan.kills}、誤殺友軍 ${artilleryPlan.losses}`
@@ -232,6 +384,22 @@
           : "先點手牌選擇兵種，再點棋盤空格部署。";
     $("#status").textContent = notice ? `${text}
 ${notice}` : text;
+  }
+
+  function updateTurnTimer() {
+    const timer = $("#turnTimer");
+    if (!timer) return;
+    if (!engine || finished()) {
+      timer.textContent = "—";
+      timer.className = "turnTimer";
+      timer.title = "";
+      return;
+    }
+    const clock = engine.turnClockState(Date.now());
+    const total = GameEngine.timeoutRules().turnMs;
+    timer.textContent = `${Math.ceil(clock.remainingMs / 1000)}s`;
+    timer.title = "本回合剩餘時間";
+    timer.className = `turnTimer ${clock.remainingMs <= total / 4 ? "urgent" : ""}`.trim();
   }
 
   // 對局進行中不顯示模式切換與重開，避免誤觸中斷戰鬥；改提供棄賽。
@@ -258,13 +426,17 @@ ${notice}` : text;
     notice = result.ok ? "" : result.error;
     if (result.ok) { selectedType = null; selectedRank = 1; hoverType = null; }
     render();
-    if (result.ok) scheduleAi();
     return result;
   }
 
   function onCell(r, c) {
     if (!humanTurn()) return;
     if (artilleryMode) { artilleryMode = false; act({ kind: "artillery", r, c }); return; }
+    if (engine.deploymentCommitted) {
+      notice = "主要行動已完成；現在仍可炮擊，或按「結束回合」。";
+      render();
+      return;
+    }
     if (moveMode()) {
       const unit = engine.board[r][c];
       if (unit && unit.pid === engine.current) { moveFrom = [r, c]; notice = ""; render(); return; }
@@ -274,7 +446,6 @@ ${notice}` : text;
       notice = result.ok ? "" : result.error;
       if (result.ok) { moveFrom = null; selectedType = null; }
       render();
-      if (result.ok) scheduleAi();
       return;
     }
     if (!selectedType) { notice = "請先選擇手牌"; render(); return; }
@@ -313,7 +484,15 @@ ${notice}` : text;
   function aiMove() {
     if (finished() || engine.current !== 2) { render(); return; }
     const player = engine.players[1];
-    if (!player.hand.length) { render(); return; }
+    if (!engine.canDeploy(2)) {
+      const move = engine.legalMoves(2)[0];
+      if (move) engine.move(2, {
+        r: move.from[0], c: move.from[1], toR: move.to[0], toC: move.to[1], turnId: engine.turnId,
+      });
+      engine.endTurn(2, { turnId: engine.turnId });
+      render();
+      return;
+    }
 
     let best = null, bestScore = -Infinity;
     for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
@@ -344,13 +523,33 @@ ${notice}` : text;
 
     const result = engine.deploy(2, { r, c, type, rank, turnId: engine.turnId });
     if (!result.ok) engine.deploy(2, { r, c, type, rank: 1, turnId: engine.turnId });
+    engine.endTurn(2, { turnId: engine.turnId });
     render();
   }
 
   // ---- 綁定 ----
   UI.wireRulesOverlay(catalog);
+  UI.wireBattleLogDrawer();
   $("#artilleryBtn").onclick = () => { if (humanTurn()) { artilleryMode = !artilleryMode; artilleryPlan = null; render(); } };
+  $("#endTurnBtn").onclick = () => {
+    if (endTurnReason()) return;
+    artilleryMode = false;
+    const result = engine.endTurn(engine.current, { turnId: engine.turnId });
+    notice = result.ok ? "" : result.error;
+    render();
+    if (result.ok) scheduleAi();
+  };
   $("#resetBtn").onclick = reset;
+  $("#resultRematchBtn").onclick = reset;
+  $("#resultLeaveBtn").onclick = () => {
+    resultOverlayDismissed = true;
+    resultReportOpen = false;
+    render();
+  };
+  $("#resultReportBtn").onclick = () => {
+    resultReportOpen = !resultReportOpen;
+    renderResultOverlay();
+  };
   $("#resignBtn").onclick = () => {
     if (!started() || finished()) return;
     // 只在本機顯示層結束對局，不修改 game_engine.js 的規則
@@ -376,5 +575,15 @@ ${notice}` : text;
   };
 
   $("#pveBtn").classList.add("active");
+  setInterval(() => {
+    if (!engine || finished()) { updateTurnTimer(); return; }
+    const result = engine.checkTurnTimeout(Date.now());
+    if (result?.ok) {
+      notice = "回合逾時，已自動結束回合。";
+      artilleryMode = false; selectedType = null; moveFrom = null;
+      render();
+      scheduleAi();
+    } else updateTurnTimer();
+  }, 250);
   reset();
 })();
