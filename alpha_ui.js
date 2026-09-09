@@ -1043,3 +1043,256 @@
 
   syncMoveHighlights();
 })();
+
+// ---- 回合流程與戰鬥可讀性：只解讀既有 UI 狀態與權威 lastCombat，不重算規則 ----
+(() => {
+  const UI = globalThis.AlphaUI;
+  if (!UI || UI.__readabilityEnhancement) return;
+  UI.__readabilityEnhancement = true;
+
+  const style = document.createElement("style");
+  style.textContent = `
+    .turnFlowGuide{flex:0 0 auto;min-width:280px;display:grid;grid-template-rows:23px 16px;gap:1px;padding:4px 8px;border:1px solid #4b4437;border-radius:10px;background:linear-gradient(145deg,rgba(44,42,36,.96),rgba(25,26,23,.96));box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
+    .turnFlowSteps{display:flex;align-items:center;gap:4px;white-space:nowrap}.turnFlowStep{padding:3px 7px;border:1px solid #4c4a43;border-radius:999px;color:#928b7f;font-size:10px;font-weight:900;line-height:1}.turnFlowStep.done{border-color:#58765e;color:#b9ddb9;background:rgba(71,111,76,.18)}.turnFlowStep.active{border-color:#d9b96d;color:#fff0b3;background:rgba(125,96,31,.33);box-shadow:0 0 12px rgba(217,185,109,.18)}.turnFlowStep.optional{border-style:dashed;color:#cdbb91}.turnFlowStep.unavailable{opacity:.48;text-decoration:line-through}.turnFlowStep.wait{border-color:#516274;color:#b9cee3}.turnFlowBrief{min-width:0;overflow:hidden;color:#a9a18f;font-size:10px;font-weight:700;text-overflow:ellipsis;white-space:nowrap}.turnFlowGuide.waiting .turnFlowBrief{color:#b7c7d8}.turnFlowGuide.combat .turnFlowBrief{color:#f0cf7c}
+    .combatReadabilityPanel{position:absolute;z-index:5;top:48px;left:7px;right:7px;display:flex;align-items:center;justify-content:space-between;gap:7px;pointer-events:none}.combatRoundMeta{display:flex;gap:4px;flex-wrap:wrap}.combatMetaChip{padding:4px 7px;border:1px solid rgba(255,255,255,.18);border-radius:999px;background:rgba(9,12,16,.82);color:#e9edf2;font-size:10px;font-weight:900;box-shadow:0 3px 10px rgba(0,0,0,.3)}.combatMetaChip.p1{border-color:#ff8787;color:#ffd2d2}.combatMetaChip.p2{border-color:#74c0fc;color:#d5edff}.combatStepStrip{display:flex;gap:3px}.combatStepPill{padding:4px 7px;border:1px solid rgba(255,255,255,.14);border-radius:999px;background:rgba(9,12,16,.76);color:#868f9a;font-size:9px;font-weight:900}.combatStepPill.done{color:#b9d7bc;border-color:#52745a}.combatStepPill.active{color:#fff0b3;border-color:#d9b96d;background:rgba(98,76,26,.84)}
+    .combatDeathTag{position:absolute;z-index:6;transform:translate(-50%,-50%);padding:3px 6px;border:1px solid #d75d5d;border-radius:999px;background:rgba(27,10,10,.9);color:#ffd6d6;font-size:clamp(8px,1.15vw,11px);font-weight:1000;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .12s ease,transform .12s ease}.combatDeathTag.show{opacity:1;transform:translate(-50%,-95%)}.combatDeathTag.p2{border-color:#6b9ec7;background:rgba(8,20,31,.92);color:#d6eeff}
+    @media(max-width:760px){.turnFlowGuide{min-width:240px}.turnFlowStep{padding:3px 5px;font-size:9px}.combatReadabilityPanel{top:45px;align-items:flex-start}.combatRoundMeta{max-width:62%}.combatStepPill{padding:3px 5px}.combatMetaChip{padding:3px 5px;font-size:9px}}
+    @media(max-width:520px){.turnFlowGuide{min-width:214px}.turnFlowStep{font-size:8px}.turnFlowBrief{font-size:9px}.combatStepStrip{display:none}.combatRoundMeta{max-width:100%}}
+  `;
+  document.head.appendChild(style);
+
+  const top = document.querySelector("#gameScreen .gameTop") || document.querySelector(".top");
+  const flow = document.createElement("div");
+  flow.className = "turnFlowGuide";
+  flow.setAttribute("aria-label", "本回合操作流程");
+  const stepRow = document.createElement("div");
+  stepRow.className = "turnFlowSteps";
+  const flowDefs = [
+    ["action", "① 行動", "部署；手牌用盡時依規則移動"],
+    ["artillery", "② 炮擊", "可選，不取代主要行動"],
+    ["end", "③ 結束", "主要行動完成後交棒"],
+    ["combat", "④ 結算", "雙方都結束後統一戰鬥結算"],
+  ];
+  const flowSteps = new Map();
+  for (const [key, label, title] of flowDefs) {
+    const node = document.createElement("span");
+    node.className = "turnFlowStep";
+    node.dataset.flowStep = key;
+    node.textContent = label;
+    node.title = title;
+    stepRow.appendChild(node);
+    flowSteps.set(key, node);
+  }
+  const brief = document.createElement("div");
+  brief.className = "turnFlowBrief";
+  brief.setAttribute("aria-live", "polite");
+  brief.textContent = "尚未結算戰鬥";
+  flow.append(stepRow, brief);
+  if (top) {
+    const help = top.querySelector("#helpBtn");
+    top.insertBefore(flow, help || null);
+  }
+
+  const statusEl = () => document.querySelector("#turnStatus") || document.querySelector("#status");
+  const endButton = () => document.querySelector("#endTurnBtn");
+  const artilleryButton = () => document.querySelector("#artilleryBtn");
+  const combatStage = () => document.querySelector("#combatStage");
+  const setStep = (key, state) => {
+    const node = flowSteps.get(key);
+    if (!node) return;
+    node.className = `turnFlowStep ${state || ""}`.trim();
+  };
+
+  function syncFlow() {
+    const status = statusEl();
+    const end = endButton();
+    const art = artilleryButton();
+    const stage = combatStage();
+    if (!end || !art) return;
+    const text = `${status?.textContent || ""} ${end.textContent || ""} ${end.title || ""} ${art.textContent || ""} ${art.title || ""}`;
+    const combatActive = Boolean(stage && !stage.classList.contains("hidden"));
+    const gameOver = /對局結束|本局已結束/.test(text);
+    const waiting = /操作暫停|等待對方|等待對手|不是你的回合|電腦正在行動|等待伺服器|尚未連上|對手已斷線/.test(text);
+    const mainDone = !end.disabled || /主要行動.*完成|已完成部署|目前已無法部署或移動|請按「結束回合」/.test(text);
+    const artilleryUsed = /本回合已使用炮擊|炮擊已使用/.test(text);
+    const artilleryEmpty = /本場炮擊已用完/.test(text);
+    flow.classList.toggle("combat", combatActive);
+    flow.classList.toggle("waiting", waiting && !combatActive);
+
+    if (gameOver) {
+      for (const key of flowSteps.keys()) setStep(key, "done");
+      return;
+    }
+    if (combatActive) {
+      setStep("action", "done");
+      setStep("artillery", artilleryUsed ? "done" : artilleryEmpty ? "unavailable" : "optional");
+      setStep("end", "done");
+      setStep("combat", "active");
+      return;
+    }
+    if (waiting) {
+      setStep("action", "wait");
+      setStep("artillery", artilleryEmpty ? "unavailable" : "wait");
+      setStep("end", "wait");
+      setStep("combat", "wait");
+      return;
+    }
+    setStep("action", mainDone ? "done" : "active");
+    setStep("artillery", artilleryUsed ? "done" : artilleryEmpty ? "unavailable"
+      : art.classList.contains("active") ? "active" : "optional");
+    setStep("end", mainDone && !end.disabled ? "active" : "");
+    setStep("combat", "wait");
+  }
+
+  const watched = [statusEl(), endButton(), artilleryButton(), combatStage()].filter(Boolean);
+  const flowObserver = new MutationObserver(() => queueMicrotask(syncFlow));
+  for (const node of watched) {
+    flowObserver.observe(node, { attributes: true, childList: true, subtree: true, characterData: true });
+  }
+  document.addEventListener("click", () => queueMicrotask(syncFlow));
+  syncFlow();
+
+  const originalCreatePlayback = UI.createCombatPlayback;
+  const typeLabel = type => UI.NAMES?.[type] || type || "單位";
+  const stats = cue => {
+    const packets = cue?.packets || [];
+    const deaths = cue?.deaths || [];
+    return {
+      p1Attack: packets.filter(item => item.from?.pid === 1).length,
+      p2Attack: packets.filter(item => item.from?.pid === 2).length,
+      p1Death: deaths.filter(item => item.unit?.pid === 1).length,
+      p2Death: deaths.filter(item => item.unit?.pid === 2).length,
+      cleaves: (cue?.cleaves || []).length,
+      reflections: (cue?.reflections || []).length,
+    };
+  };
+  function briefText(cue, live = false) {
+    if (!cue) return "尚未結算戰鬥";
+    const s = stats(cue);
+    const specials = [s.cleaves ? `斬入${s.cleaves}` : "", s.reflections ? `反震${s.reflections}` : ""].filter(Boolean).join("／");
+    if (!s.p1Attack && !s.p2Attack && !s.p1Death && !s.p2Death) return `R${cue.round}｜本輪沒有交戰`;
+    return `${live ? `R${cue.round} 結算中` : `上一輪 R${cue.round}`}｜攻擊 P1 ${s.p1Attack}／P2 ${s.p2Attack}`
+      + `｜陣亡 P1 ${s.p1Death}／P2 ${s.p2Death}${specials ? `｜${specials}` : ""}`;
+  }
+
+  UI.createCombatPlayback = options => {
+    let panel = null;
+    let labelObserver = null;
+    let piecesObserver = null;
+    const originalFinish = options?.onFinish;
+    const wrapped = originalCreatePlayback({
+      ...options,
+      onFinish: finishedCue => {
+        brief.textContent = briefText(finishedCue, false);
+        clearDecorations();
+        syncFlow();
+        if (typeof originalFinish === "function") originalFinish(finishedCue);
+      },
+    });
+
+    function clearDecorations() {
+      labelObserver?.disconnect();
+      piecesObserver?.disconnect();
+      labelObserver = null;
+      piecesObserver = null;
+      panel?.remove();
+      panel = null;
+    }
+
+    function syncDeathTags() {
+      if (!options?.piecesEl) return;
+      for (const tag of options.piecesEl.querySelectorAll(".combatDeathTag")) {
+        const id = tag.dataset.unitId;
+        const piece = options.piecesEl.querySelector(`.combatDeathPiece[data-unit-id="${id}"]`);
+        tag.classList.toggle("show", Boolean(piece?.classList.contains("combatDeathFading")));
+      }
+    }
+
+    function decorate(cue) {
+      clearDecorations();
+      const stage = options?.stageEl;
+      const label = options?.labelEl;
+      const pieces = options?.piecesEl;
+      if (!stage || !label || !pieces) return;
+      const s = stats(cue);
+      panel = document.createElement("div");
+      panel.className = "combatReadabilityPanel";
+      const meta = document.createElement("div");
+      meta.className = "combatRoundMeta";
+      const chips = [
+        ["p1", `P1 攻 ${s.p1Attack}`], ["p2", `P2 攻 ${s.p2Attack}`],
+        ["p1", `☠ P1 ${s.p1Death}`], ["p2", `☠ P2 ${s.p2Death}`],
+      ];
+      for (const [kind, text] of chips) {
+        const chip = document.createElement("span");
+        chip.className = `combatMetaChip ${kind}`;
+        chip.textContent = text;
+        meta.appendChild(chip);
+      }
+      const strip = document.createElement("div");
+      strip.className = "combatStepStrip";
+      const defs = [["主攻擊", "攻擊"], ["傷害與陣亡", "傷害"]];
+      if (s.cleaves) defs.push(["斬入", "斬入"]);
+      if (s.reflections) defs.push(["反震", "反震"]);
+      const stepNodes = defs.map(([match, text]) => {
+        const node = document.createElement("span");
+        node.className = "combatStepPill";
+        node.dataset.match = match;
+        node.textContent = text;
+        strip.appendChild(node);
+        return node;
+      });
+      panel.append(meta, strip);
+      stage.appendChild(panel);
+
+      for (const death of cue.deaths || []) {
+        const tag = document.createElement("div");
+        tag.className = `combatDeathTag p${death.unit.pid}`;
+        tag.dataset.unitId = String(death.unit.id);
+        tag.style.left = `${(death.c + .5) / 9 * 100}%`;
+        tag.style.top = `${(death.r + .5) / 9 * 100}%`;
+        tag.textContent = `☠ P${death.unit.pid} ${"★".repeat(death.unit.rank || 1)}${typeLabel(death.unit.type)}`;
+        pieces.appendChild(tag);
+      }
+
+      const syncSteps = () => {
+        const text = label.textContent || "";
+        let activeIndex = stepNodes.findIndex(node => text.includes(node.dataset.match));
+        if (activeIndex < 0) activeIndex = 0;
+        stepNodes.forEach((node, index) => {
+          node.classList.toggle("done", index < activeIndex);
+          node.classList.toggle("active", index === activeIndex);
+        });
+      };
+      labelObserver = new MutationObserver(syncSteps);
+      labelObserver.observe(label, { childList: true, subtree: true, characterData: true });
+      piecesObserver = new MutationObserver(syncDeathTags);
+      piecesObserver.observe(pieces, { attributes: true, childList: true, subtree: true, attributeFilter: ["class"] });
+      syncSteps();
+      syncDeathTags();
+    }
+
+    return {
+      play(cue) {
+        brief.textContent = briefText(cue, true);
+        const ok = wrapped.play(cue);
+        if (ok) decorate(cue);
+        else brief.textContent = briefText(cue, false);
+        syncFlow();
+        return ok;
+      },
+      skip() {
+        wrapped.skip();
+        clearDecorations();
+        syncFlow();
+      },
+      reset() {
+        wrapped.reset();
+        clearDecorations();
+        brief.textContent = "尚未結算戰鬥";
+        syncFlow();
+      },
+      active: wrapped.active,
+    };
+  };
+})();
