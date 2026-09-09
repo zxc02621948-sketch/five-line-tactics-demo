@@ -817,3 +817,229 @@
     artilleryDisabledReason, endTurnDisabledReason, rankDisabledReason, wireBattleLogDrawer,
   };
 })();
+
+// ---- 觸控操作保護：單機與連線共用 ----
+// 桌機維持原本的一鍵操作；觸控裝置第一次點格只做預覽，第二次點同格或按確認才送給既有 client。
+(() => {
+  const touchLike = typeof matchMedia === "function"
+    && (matchMedia("(hover: none)").matches || matchMedia("(pointer: coarse)").matches);
+  if (!touchLike) return;
+
+  let previewCell = null;
+  let previewMode = null;
+  let previewControls = null;
+  let previewHint = "";
+
+  const board = () => document.querySelector("#board");
+  const status = () => document.querySelector("#turnStatus") || document.querySelector("#status");
+  const rankRow = () => document.querySelector("#rankRow");
+  const artilleryButton = () => document.querySelector("#artilleryBtn");
+  const selectedCard = () => document.querySelector(".card.sel:not(:disabled)");
+  const cells = () => [...(board()?.querySelectorAll(":scope > .cell") || [])];
+
+  function boardSize() {
+    const size = Math.sqrt(cells().length);
+    return Number.isInteger(size) ? size : 0;
+  }
+
+  function coords(cell) {
+    const all = cells();
+    const size = boardSize();
+    const index = all.indexOf(cell);
+    if (index < 0 || !size) return null;
+    return { r: Math.floor(index / size), c: index % size, size };
+  }
+
+  function movementSource() {
+    const match = (status()?.textContent || "").match(/已選\s*\((\d+),(\d+)\)/);
+    return match ? { r: Number(match[1]) - 1, c: Number(match[2]) - 1 } : null;
+  }
+
+  function movementRules() {
+    return globalThis.FiveLineEngine?.GameEngine?.movementRules?.() || null;
+  }
+
+  function legalMoveCell(cell, source = movementSource()) {
+    if (!source || !cell || cell.querySelector(".unit")) return false;
+    const point = coords(cell);
+    const rules = movementRules();
+    if (!point || !rules) return false;
+    const dr = Math.abs(point.r - source.r);
+    const dc = Math.abs(point.c - source.c);
+    const distance = rules.orthogonalOnly ? dr + dc : Math.max(dr, dc);
+    if (rules.orthogonalOnly && dr > 0 && dc > 0) return false;
+    return distance > 0 && distance <= Number(rules.range || 0);
+  }
+
+  function clearMoveHighlights() {
+    for (const cell of cells()) cell.classList.remove("move-source", "move-target");
+  }
+
+  function syncMoveHighlights() {
+    clearMoveHighlights();
+    const source = movementSource();
+    const all = cells();
+    const size = boardSize();
+    if (!source || !size) return;
+    all[source.r * size + source.c]?.classList.add("move-source");
+    for (const cell of all) if (legalMoveCell(cell, source)) cell.classList.add("move-target");
+  }
+
+  function removePreviewControls() {
+    previewControls?.remove();
+    previewControls = null;
+  }
+
+  function clearPreview({ keepMoveHighlights = true } = {}) {
+    if (previewCell) {
+      previewCell.classList.remove(
+        "touch-preview-target", "touch-preview-deploy", "touch-preview-artillery",
+        "touch-preview-move", "touch-preview-blocked"
+      );
+      previewCell.dispatchEvent(new MouseEvent("mouseleave", { bubbles: false }));
+    }
+    previewCell = null;
+    previewMode = null;
+    previewHint = "";
+    removePreviewControls();
+    if (keepMoveHighlights) syncMoveHighlights();
+    else clearMoveHighlights();
+  }
+
+  function currentMode() {
+    const art = artilleryButton();
+    if (art && !art.disabled && art.classList.contains("active")) return "artillery";
+    if (selectedCard()) return "deploy";
+    if (movementSource()) return "move";
+    return null;
+  }
+
+  function previewLabel(mode, point) {
+    const cardName = selectedCard()?.querySelector(".name")?.textContent?.trim();
+    const where = `(${point.r + 1},${point.c + 1})`;
+    if (mode === "artillery") return `炮擊中心 ${where}`;
+    if (mode === "move") return `移動到 ${where}`;
+    if (mode === "blocked") return "這格目前不能移動";
+    return `${cardName ? `${cardName} ` : ""}部署到 ${where}`;
+  }
+
+  function renderPreviewControls() {
+    removePreviewControls();
+    const row = rankRow();
+    if (!row || !previewCell || !previewMode) return;
+    const point = coords(previewCell);
+    if (!point && previewMode !== "blocked") return;
+
+    const wrap = document.createElement("div");
+    wrap.className = "touchPreviewControls";
+    const hint = document.createElement("span");
+    hint.className = "touchPreviewHint";
+    hint.textContent = previewHint || previewLabel(previewMode, point || { r: 0, c: 0 });
+
+    const confirm = document.createElement("button");
+    confirm.type = "button";
+    confirm.className = "btn touchConfirmBtn";
+    confirm.disabled = previewMode === "blocked";
+    confirm.textContent = previewMode === "blocked"
+      ? "不可移動"
+      : previewMode === "artillery" ? "確認炮擊" : previewMode === "move" ? "確認移動" : "確認部署";
+    confirm.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const target = previewCell;
+      if (!confirm.disabled && target) target.click();
+    });
+
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "btn touchCancelBtn";
+    cancel.textContent = "取消";
+    cancel.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      clearPreview();
+    });
+
+    wrap.append(hint, confirm, cancel);
+    row.appendChild(wrap);
+    previewControls = wrap;
+  }
+
+  function setPreview(cell, mode, hint = "") {
+    clearPreview();
+    previewCell = cell;
+    previewMode = mode;
+    previewHint = hint;
+    cell.classList.add("touch-preview-target", `touch-preview-${mode}`);
+    if (mode !== "blocked") cell.dispatchEvent(new MouseEvent("mouseenter", { bubbles: false }));
+    renderPreviewControls();
+  }
+
+  document.addEventListener("click", event => {
+    const cell = event.target.closest?.("#board > .cell");
+    if (!cell) {
+      const control = event.target.closest?.(".card, #rankRow .btn, #artilleryBtn, #endTurnBtn");
+      if (control && !control.closest?.(".touchPreviewControls") && previewCell) clearPreview();
+      return;
+    }
+
+    const mode = currentMode();
+    if (!mode) {
+      clearPreview();
+      return;
+    }
+
+    if (mode === "move") {
+      const source = movementSource();
+      if (!source) return;
+      if (cell.querySelector(".unit")) {
+        clearPreview();
+        return;
+      }
+      if (!legalMoveCell(cell, source)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        setPreview(cell, "blocked", "這格不在目前可移動範圍，請改選亮起的格子。");
+        return;
+      }
+    }
+
+    if (previewCell === cell && previewMode === mode) {
+      clearPreview();
+      queueMicrotask(syncMoveHighlights);
+      return;
+    }
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    setPreview(cell, mode);
+  }, true);
+
+  document.addEventListener("click", event => {
+    const target = event.target.closest?.(".card, #rankRow .btn, #artilleryBtn, #endTurnBtn");
+    if (!target || target.closest?.(".touchPreviewControls")) return;
+    queueMicrotask(syncMoveHighlights);
+  });
+
+  document.addEventListener("keydown", event => {
+    if (event.key !== "Escape" || !previewCell) return;
+    if (["INPUT", "TEXTAREA", "SELECT"].includes(event.target?.tagName)) return;
+    event.preventDefault();
+    clearPreview();
+  });
+
+  const watchStatus = status();
+  if (watchStatus) {
+    new MutationObserver(() => queueMicrotask(syncMoveHighlights))
+      .observe(watchStatus, { childList: true, subtree: true, characterData: true });
+  }
+  const watchBoard = board();
+  if (watchBoard) {
+    new MutationObserver(() => {
+      if (previewCell && !previewCell.isConnected) clearPreview();
+      queueMicrotask(syncMoveHighlights);
+    }).observe(watchBoard, { childList: true });
+  }
+
+  syncMoveHighlights();
+})();

@@ -616,3 +616,107 @@
   .combatDeathFading,
   .combatCleaveMoving { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* ---- 觸控操作預覽：只輔助尚未提交的操作，不改規則 ---- */
+.actionStatus {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  white-space: pre-line;
+  line-height: 1.45;
+}
+.bandActionStatus { min-height: 48px; }
+
+.cell.move-source .unit {
+  box-shadow: 0 0 0 3px rgba(240, 207, 124, .7), 0 0 18px rgba(240, 207, 124, .55) !important;
+}
+.cell.move-target {
+  box-shadow: inset 0 0 0 2px rgba(240, 207, 124, .72), inset 0 0 18px rgba(240, 207, 124, .16);
+}
+.cell.move-target::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 22%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border: 2px solid #f0cf7c;
+  border-radius: 50%;
+  background: rgba(240, 207, 124, .16);
+  box-shadow: 0 0 10px rgba(240, 207, 124, .45);
+  pointer-events: none;
+}
+
+.cell.touch-preview-target {
+  z-index: 4;
+  box-shadow: inset 0 0 0 3px #f0cf7c, inset 0 0 22px rgba(240, 207, 124, .28) !important;
+}
+.cell.touch-preview-target::before {
+  content: "確認";
+  position: absolute;
+  z-index: 8;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 3px 6px;
+  border: 1px solid #f0cf7c;
+  border-radius: 999px;
+  background: rgba(16, 18, 16, .9);
+  color: #fff1bd;
+  font-size: clamp(8px, 1.35vw, 11px);
+  font-weight: 900;
+  line-height: 1.1;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.cell.touch-preview-artillery {
+  box-shadow: inset 0 0 0 3px #ef9658, inset 0 0 24px rgba(239, 107, 72, .3) !important;
+}
+.cell.touch-preview-artillery::before {
+  content: "炮擊";
+  border-color: #ef9658;
+  color: #ffd6bd;
+}
+.cell.touch-preview-move::before { content: "移動"; }
+.cell.touch-preview-blocked {
+  box-shadow: inset 0 0 0 3px #d86868, inset 0 0 22px rgba(216, 104, 104, .3) !important;
+}
+.cell.touch-preview-blocked::before {
+  content: "不可";
+  border-color: #e07a7a;
+  color: #ffd2d2;
+}
+
+.touchPreviewControls {
+  flex: 1 1 100%;
+  min-width: 0;
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+}
+.touchPreviewHint {
+  min-width: 0;
+  overflow: hidden;
+  color: #e3d1a9;
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.touchConfirmBtn {
+  min-height: 44px;
+  border-color: #d9b96d !important;
+  background: #59481e !important;
+  color: #fff0b3 !important;
+  font-weight: 900;
+}
+.touchCancelBtn { min-height: 44px; }
+
+@media (max-width: 520px) {
+  .touchPreviewHint { font-size: 11px; }
+  .touchConfirmBtn,
+  .touchCancelBtn { padding-left: 9px; padding-right: 9px; }
+}
