@@ -1296,3 +1296,188 @@
     };
   };
 })();
+
+// ---- 主動戰術檢視：只解讀玩家正在查看的單格，不做全盤五連威脅提示 ----
+(() => {
+  const UI = globalThis.AlphaUI;
+  if (!UI || UI.__tacticalInspect) return;
+  UI.__tacticalInspect = true;
+
+  const originalFocusOn = UI.focusOn;
+  const originalDrawForecast = UI.drawForecast;
+
+  UI.focusOn = (result, r, c) => {
+    const base = originalFocusOn(result, r, c);
+    if (!base || !result) return base;
+
+    const rawOutgoing = (result.packets || []).filter(packet => packet.from.r === r && packet.from.c === c);
+    const rawIncoming = (result.packets || []).filter(packet => packet.to.r === r && packet.to.c === c);
+    const damage = (result.damage || []).find(item => item.r === r && item.c === c) || null;
+    const subject = rawOutgoing[0]?.from || rawIncoming[0]?.to
+      || (damage ? { unitId: damage.unitId, pid: damage.pid, type: damage.type } : null);
+    const subjectId = subject?.unitId ?? damage?.unitId ?? null;
+    const guardsFor = result.guards?.[`${r},${c}`] || [];
+    const guardingTargets = Object.entries(result.guards || {})
+      .filter(([, guards]) => guards.some(guard => guard.r === r && guard.c === c))
+      .map(([key]) => {
+        const [rr, cc] = key.split(",").map(Number);
+        return { r: rr, c: cc };
+      });
+    const diesById = subjectId !== null
+      && (result.deaths || []).some(item => String(item.unit?.id) === String(subjectId));
+
+    return {
+      ...base,
+      point: { r, c },
+      subject,
+      selfDies: diesById || base.selfDies,
+      outgoingDamage: base.outgoing.reduce((sum, item) => sum + item.amount, 0),
+      incomingDamage: damage?.damage || 0,
+      hpAfter: damage ? Math.max(0, Math.round(damage.hpAfter)) : null,
+      guardsFor,
+      guardingTargets,
+      counterOutgoing: rawOutgoing.filter(packet => Number(packet.counterBonus) > 0).length,
+      counterIncoming: rawIncoming.filter(packet => Number(packet.counterBonus) > 0).length,
+    };
+  };
+
+  UI.drawForecast = (layer, boardEl, view, focus) => {
+    originalDrawForecast(layer, boardEl, view, focus);
+    if (!layer || !boardEl || !focus?.point) return;
+    const size = boardEl.clientWidth;
+    if (!size) return;
+    const cell = size / 9;
+    const add = (tag, attrs, text) => {
+      const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+      for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+      if (text !== undefined) node.textContent = text;
+      layer.appendChild(node);
+      return node;
+    };
+    const unique = list => {
+      const seen = new Set();
+      return list.filter(point => {
+        const key = `${point.r},${point.c}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+    const ring = (point, className, inset = 3) => add("rect", {
+      class: className,
+      x: point.c * cell + inset,
+      y: point.r * cell + inset,
+      width: cell - inset * 2,
+      height: cell - inset * 2,
+      rx: Math.max(4, cell * .09),
+    });
+
+    for (const point of unique(focus.incoming.map(item => item.from))) ring(point, "fcSourceRing", 4);
+    for (const point of unique(focus.outgoing.map(item => item.to))) ring(point, "fcTargetRing", 4);
+    for (const point of unique(focus.guardsFor || [])) ring(point, "fcGuardRing", 6);
+    for (const point of unique(focus.guardingTargets || [])) ring(point, "fcGuardTargetRing", 7);
+    ring(focus.point, `fcFocusRing ${focus.selfDies ? "danger" : focus.incomingDamage > 0 ? "engaged" : "active"}`, 2);
+
+    const typeName = UI.NAMES?.[focus.subject?.type] || "單位";
+    const label = focus.selfDies ? "致命危險"
+      : focus.incomingDamage > 0 && focus.outgoingDamage > 0 ? "交戰"
+        : focus.incomingDamage > 0 ? "受擊"
+          : focus.outgoingDamage > 0 ? "主攻" : "觀察";
+    const tone = focus.selfDies ? "danger" : focus.incomingDamage > 0 ? "engaged" : "active";
+    const extras = [];
+    if (focus.guardsFor?.length) extras.push(`護衛×${focus.guardsFor.length}`);
+    if (focus.guardingTargets?.length) extras.push(`護援×${focus.guardingTargets.length}`);
+    if (focus.counterOutgoing) extras.push(`克制×${focus.counterOutgoing}`);
+    if (focus.counterIncoming) extras.push(`被克制×${focus.counterIncoming}`);
+    if (focus.selfDies) extras.push("預測陣亡");
+    else if (focus.hpAfter !== null) extras.push(`預測HP ${focus.hpAfter}`);
+
+    const cardW = Math.max(140, Math.min(210, size - 12));
+    const cardH = 58;
+    const x = focus.point.c >= 4 ? 6 : size - cardW - 6;
+    const y = focus.point.r >= 4 ? 6 : size - cardH - 6;
+    add("rect", { class: `fcTacticalBg ${tone}`, x, y, width: cardW, height: cardH, rx: 10 });
+    add("text", { class: `fcTacticalTitle ${tone}`, x: x + 10, y: y + 17 },
+      `${focus.subject?.pid ? `P${focus.subject.pid} ` : ""}${typeName}｜${label}`);
+    add("text", { class: "fcTacticalLine", x: x + 10, y: y + 34 },
+      `攻 ${Math.round(focus.outgoingDamage || 0)} → ${focus.outgoing.length}　承 ${Math.round(focus.incomingDamage || 0)} ← ${focus.incoming.length}`);
+    add("text", { class: `fcTacticalMeta ${focus.selfDies ? "danger" : ""}`, x: x + 10, y: y + 50 },
+      extras.join("｜") || "目前只顯示這一格的交戰關係");
+  };
+
+  const style = document.createElement("style");
+  style.textContent = `
+    .fcLine.out{stroke:#f0a45e;stroke-width:3;filter:drop-shadow(0 0 3px rgba(240,164,94,.42))}
+    .fcLine.in{stroke:#6db9e8;stroke-width:3;stroke-dasharray:6 4;filter:drop-shadow(0 0 3px rgba(109,185,232,.4))}
+    .fcHead.out{fill:#f0a45e}.fcHead.in{fill:#6db9e8}
+    .fcTargetRing{fill:none;stroke:#f0a45e;stroke-width:2.4;stroke-dasharray:2 3}
+    .fcSourceRing{fill:none;stroke:#6db9e8;stroke-width:2.4;stroke-dasharray:5 3}
+    .fcGuardRing{fill:none;stroke:#75c982;stroke-width:2.6}
+    .fcGuardTargetRing{fill:none;stroke:#75c982;stroke-width:2;stroke-dasharray:3 4}
+    .fcFocusRing{fill:none;stroke:#e7c875;stroke-width:3.4;filter:drop-shadow(0 0 5px rgba(231,200,117,.55))}
+    .fcFocusRing.engaged{stroke:#e08b5c}.fcFocusRing.danger{stroke:#ef6868;stroke-width:4;stroke-dasharray:5 3}
+    .fcTacticalBg{fill:rgba(15,17,16,.93);stroke:#7d715a;stroke-width:1.5;filter:drop-shadow(0 5px 8px rgba(0,0,0,.42))}
+    .fcTacticalBg.engaged{stroke:#d28a5f}.fcTacticalBg.danger{stroke:#e46868}
+    .fcTacticalTitle{fill:#f3e7ca;font-size:12px;font-weight:900}.fcTacticalTitle.engaged{fill:#ffd0b1}.fcTacticalTitle.danger{fill:#ffd0d0}
+    .fcTacticalLine{fill:#e8e1d5;font-size:10px;font-weight:800}.fcTacticalMeta{fill:#b8ad99;font-size:9px;font-weight:700}.fcTacticalMeta.danger{fill:#ffb8b8}
+    .cell.touch-inspect-cell .unit{box-shadow:0 0 0 3px rgba(231,200,117,.72),0 0 18px rgba(231,200,117,.55)!important}
+    @media(max-width:520px){
+      .fcTacticalTitle{font-size:10px}.fcTacticalLine{font-size:8.5px}.fcTacticalMeta{font-size:8px}
+    }
+  `;
+  document.head.appendChild(style);
+
+  const touchLike = typeof matchMedia === "function"
+    && (matchMedia("(hover: none)").matches || matchMedia("(pointer: coarse)").matches);
+  if (!touchLike) return;
+
+  let inspectCell = null;
+  const board = () => document.querySelector("#board");
+  const status = () => document.querySelector("#turnStatus") || document.querySelector("#status");
+  const hasActionMode = () => {
+    const art = document.querySelector("#artilleryBtn");
+    if (art && !art.disabled && art.classList.contains("active")) return true;
+    if (document.querySelector(".card.sel:not(:disabled)")) return true;
+    const text = status()?.textContent || "";
+    return /手牌已用盡|本回合改為移動|已選\s*\(\d+,\d+\)/.test(text);
+  };
+  const combatActive = () => {
+    const stage = document.querySelector("#combatStage");
+    return Boolean(stage && !stage.classList.contains("hidden"));
+  };
+  const clearInspect = () => {
+    if (inspectCell?.isConnected) {
+      inspectCell.classList.remove("touch-inspect-cell");
+      inspectCell.dispatchEvent(new MouseEvent("mouseleave", { bubbles: false }));
+    }
+    inspectCell = null;
+  };
+
+  document.addEventListener("click", event => {
+    const cell = event.target.closest?.("#board > .cell");
+    if (!cell || !cell.querySelector(".unit") || hasActionMode() || combatActive()) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    if (inspectCell === cell) {
+      clearInspect();
+      return;
+    }
+    clearInspect();
+    inspectCell = cell;
+    cell.classList.add("touch-inspect-cell");
+    cell.dispatchEvent(new MouseEvent("mouseenter", { bubbles: false }));
+  }, true);
+
+  document.addEventListener("click", event => {
+    if (!inspectCell) return;
+    if (event.target.closest?.(".card, #artilleryBtn, #endTurnBtn, #rankRow .btn, .matchMenu, .overlay")) clearInspect();
+  });
+
+  const boardEl = board();
+  if (boardEl) {
+    new MutationObserver(() => {
+      if (inspectCell && !inspectCell.isConnected) inspectCell = null;
+    }).observe(boardEl, { childList: true });
+  }
+})();
