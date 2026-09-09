@@ -879,6 +879,11 @@ class GameEngine {
     return catalog;
   }
 
+  // 純顯示用：各星級的實際耗牌數。
+  static deploymentRules() {
+    return { ranks: [1, 2].map(rank => ({ rank, cost: cardCost(rank) })) };
+  }
+
   // 純顯示用：加賽與消極判負的實際參數，讓 UI 不必自己抄一份數值。
   static overtimeRules() {
     return { ...OVERTIME_RULES, passivityForfeitRounds: PASSIVITY_FORFEIT_ROUNDS };
@@ -979,6 +984,7 @@ class GameEngine {
       startingPlayer: this.startingPlayer,
       turnOrderMode: this.turnOrderMode,
       unitCatalog: GameEngine.unitCatalog(),
+      deploymentRules: GameEngine.deploymentRules(),
       artilleryRules: GameEngine.artilleryRules(),
       movementRules: GameEngine.movementRules(),
       timeoutRules: GameEngine.timeoutRules(),
@@ -988,6 +994,8 @@ class GameEngine {
       artilleryUsedThisTurn: this.artilleryUsedThisTurn,
       deploymentCommitted: this.deploymentCommitted,
       canAct: !this.gameOver && pid === this.current && !this.deploymentCommitted && this.canAct(pid),
+      legalMoves: !this.gameOver && pid === this.current && !this.deploymentCommitted
+        ? this.legalMoves(pid).map(move => ({ from: [...move.from], to: [...move.to] })) : [],
       turnDeadline: turnClock.deadline,
       turnClockPaused: turnClock.paused,
       turnRemainingMs: turnClock.remainingMs,

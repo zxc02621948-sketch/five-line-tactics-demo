@@ -1,9 +1,9 @@
 (() => {
   const UI = globalThis.AlphaUI;
-  const { ICONS, NAMES } = UI;
+  const design = globalThis.BattleDesign.mount({ online: true });
+  const { NAMES } = UI;
   const $ = selector => document.querySelector(selector);
   const boardEl = $("#board");
-  const handEl = $("#hand");
   const logEl = $("#log");
   // 正式 Alpha 一律固定 P1 → P2 → combat。alternating 只保留給開發測試，
   // 必須明確在網址加上 ?turnOrder=alternating 才會啟用，一般入口不會碰到。
@@ -18,6 +18,9 @@
   }
   let socket;
   let connected = false;
+  let awaitingState = false;
+  let stateSyncTimer = null;
+  let reconnectSession = null;
   let roomCode = null;
   let selfPid = null;
   let rematchState = { self: false, opponent: false };
@@ -57,9 +60,12 @@
 
   function sessionKey() { return `five-line-alpha-session-${requestedMode}`; }
   function saveSession(message) {
-    localStorage.setItem(sessionKey(), JSON.stringify({ roomCode: message.roomCode, token: message.token, pid: message.pid }));
+    reconnectSession = { roomCode: message.roomCode, token: message.token, pid: message.pid };
+    try { localStorage.setItem(sessionKey(), JSON.stringify(reconnectSession)); }
+    catch { /* 本次頁面仍保留重連資料。 */ }
   }
   function loadSession() {
+    if (reconnectSession) return reconnectSession;
     try { return JSON.parse(localStorage.getItem(sessionKey()) || "null"); }
     catch { return null; }
   }
@@ -91,6 +97,25 @@
     cancelPendingRequestTimeout();
   }
 
+  function clearStateSync() {
+    awaitingState = false;
+    if (stateSyncTimer !== null) clearTimeout(stateSyncTimer);
+    stateSyncTimer = null;
+  }
+
+  function requestCurrentState() {
+    const saved = loadSession();
+    if (!connected || !saved?.roomCode || !saved?.token) return;
+    clearStateSync();
+    awaitingState = true;
+    design.clearDraft();
+    send({ type: "reconnect", roomCode: saved.roomCode, token: saved.token });
+    stateSyncTimer = setTimeout(() => {
+      stateSyncTimer = null;
+      if (awaitingState) socket.close(); // 重新建立正常連線，不重送結果不明的行動。
+    }, REQUEST_TIMEOUT_MS);
+  }
+
   function schedulePendingRequestTimeout() {
     cancelPendingRequestTimeout();
     pendingRequestTimer = setTimeout(() => {
@@ -98,7 +123,8 @@
       pendingRequest = false;
       pendingRequestTimer = null;
       pendingTimedOut = true;
-      notice = `伺服器超過 ${REQUEST_TIMEOUT_MS / 1000} 秒沒有回傳新狀態，已解除等待，請重試。`;
+      notice = `伺服器超過 ${REQUEST_TIMEOUT_MS / 1000} 秒沒有回傳新狀態；尚未確認結果，正在同步最新局面。`;
+      requestCurrentState();
       render();
     }, REQUEST_TIMEOUT_MS);
   }
@@ -109,13 +135,13 @@
     socket.addEventListener("open", () => {
       connected = true;
       notice = "";
-      const saved = loadSession();
-      if (saved?.roomCode && saved?.token) send({ type: "reconnect", roomCode: saved.roomCode, token: saved.token });
+      requestCurrentState();
       if (pendingRequest) schedulePendingRequestTimeout();
       render();
     });
     socket.addEventListener("close", () => {
       connected = false;
+      clearStateSync();
       // 斷線期間不倒數；重連後若仍在等待，再重新給完整 10 秒。
       cancelPendingRequestTimeout();
       notice = "與伺服器斷線，正在嘗試重新連線…";
@@ -138,6 +164,8 @@
         $("#directPasswordInput").value = "";
       } else if (message.type === "state") {
         const previousTurnId = state?.turnId;
+        const wasSyncing = awaitingState;
+        clearStateSync();
         gameClockDelta = Date.now() - Number(message.serverNow || Date.now());
         opponentDisconnectDeadline = Number(message.opponentDisconnectDeadline) || null;
         roomCode = message.roomCode;
@@ -146,13 +174,21 @@
         roomStatus = message.status;
         roomInfo = message.room || null;
         state = message.state;
+        if (wasSyncing) {
+          combatPlayback.reset();
+          combatMatchId = state?.matchId || null;
+          lastCombatId = state?.lastCombat?.id || null;
+          pendingCombat = null;
+          design.clearDraft(); design.clearInspect();
+          selectedType = null; selectedRank = 1; hoverType = null; artilleryMode = false; moveFrom = null;
+        }
         rematchState = message.rematch || { self: false, opponent: false };
         clearPendingRequest();
         if (pendingTimedOut) notice = "";
         pendingTimedOut = false;
         if (!state?.gameOver) resultReportOpen = false;
         if (!state || state.current !== selfPid || state.turnId !== previousTurnId) {
-          selectedType = null; selectedRank = 1; artilleryMode = false; moveFrom = null;
+          selectedType = null; selectedRank = 1; hoverType = null; artilleryMode = false; moveFrom = null;
         } else if (state.deploymentCommitted) {
           selectedType = null; selectedRank = 1; moveFrom = null;
         }
@@ -160,6 +196,7 @@
         clearPendingRequest();
         pendingTimedOut = false;
         if (message.errorCode === "reconnect_failed") {
+          clearStateSync(); reconnectSession = null;
           roomCode = null; selfPid = null; state = null; roomStatus = "none"; roomInfo = null;
           opponentConnected = false; opponentDisconnectDeadline = null;
           combatPlayback.reset(); combatMatchId = null; lastCombatId = null; pendingCombat = null;
@@ -176,6 +213,7 @@
       } else if (message.type === "accepted") {
         notice = "";
       } else if (message.type === "left") {
+        clearStateSync(); reconnectSession = null;
         // 主動離開：把本機的房間狀態清乾淨，才不會拿舊房的 state 去比對新的 selfPid
         roomCode = null; selfPid = null; state = null; roomStatus = null; roomInfo = null;
         opponentConnected = false; opponentDisconnectDeadline = null;
@@ -195,28 +233,14 @@
     });
   }
 
-  // 手牌用盡且場上還有棋子可以走時，本回合改為移動。
-  // 連線端沒有引擎實例，從 state.board 自行推導（規則參數仍取自 state.movementRules）。
+  // 移動落點直接使用伺服器提供的合法清單，前端只做選取。
   function moveMode() {
-    if (!state || state.gameOver || state.deploymentCommitted || state.own.hand.length > 0) return false;
-    return legalMovesFromState().length > 0;
-  }
-  function legalMovesFromState() {
-    if (!state) return [];
-    const moves = [];
-    for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
-      const unit = state.board[r][c];
-      if (!unit || unit.pid !== selfPid) continue;
-      for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const nr = r + dr, nc = c + dc;
-        if (nr >= 0 && nc >= 0 && nr < 9 && nc < 9 && !state.board[nr][nc]) moves.push([r, c, nr, nc]);
-      }
-    }
-    return moves;
+    return Boolean(state && !state.gameOver && !state.deploymentCommitted && state.legalMoves?.length);
   }
 
   function turnBlockReason() {
     if (!connected) return "尚未連上伺服器";
+    if (awaitingState) return "正在同步最新局面";
     if (!state) return "等待正式遊戲狀態";
     if (pendingCombat || combatPlayback.active()) return "戰鬥演出中";
     if (pendingRequest) return "等待伺服器回應";
@@ -263,6 +287,7 @@
   function sendIntent(intent) {
     if (!ownTurn()) return;
     const requestId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+    design.clearDraft();
     pendingRequest = true;
     pendingTimedOut = false;
     send({ type: "action", requestId, intent: { ...intent, turnId: state.turnId } });
@@ -270,29 +295,44 @@
     render();
   }
 
+  function confirmAction(intent) {
+    if (!ownTurn() || (intent.kind === "artillery" ? artilleryReason() : placementBlockReason())) return;
+    if (intent.kind === "artillery") artilleryMode = false;
+    sendIntent(intent);
+  }
+
+  function cancelSelection() {
+    if (turnBlockReason()) return;
+    design.clearDraft(); design.clearInspect();
+    selectedType = null; selectedRank = 1; hoverType = null;
+    artilleryMode = false; moveFrom = null; hoverCell = null; notice = "";
+    render();
+  }
+
   function onCell(r, c) {
+    if (!state) return;
+    const unit = state.board[r][c];
+    if (unit) { design.inspect(unit); renderCardDetail(); }
     if (!ownTurn()) return;
     if (artilleryMode) {
-      artilleryMode = false;
-      sendIntent({ kind: "artillery", r, c });
-      return;
+      design.setDraft({ kind: "artillery", r, c }, state); notice = ""; render(); return;
     }
-    if (state.deploymentCommitted) {
-      notice = "主要行動已完成；現在仍可炮擊，或按「結束回合」。";
-      render();
-      return;
-    }
+    if (state.deploymentCommitted) return;
     if (moveMode()) {
-      const unit = state.board[r][c];
-      if (unit && unit.pid === selfPid) { moveFrom = [r, c]; notice = ""; render(); return; }
-      if (!moveFrom) { notice = "手牌已用盡：請先點自己的一顆棋，再點相鄰空格。"; render(); return; }
-      const [fr, fc] = moveFrom;
-      moveFrom = null;
-      sendIntent({ kind: "move", r: fr, c: fc, toR: r, toC: c });
-      return;
+      if (unit?.pid === selfPid) {
+        design.clearDraft(); moveFrom = [r, c]; notice = ""; render(); return;
+      }
+      const legal = moveFrom && state.legalMoves.some(move =>
+        move.from[0] === moveFrom[0] && move.from[1] === moveFrom[1] && move.to[0] === r && move.to[1] === c);
+      if (!legal) { notice = "請選擇自己棋子旁標示的合法空格。"; render(); return; }
+      design.setDraft({ kind: "move", r: moveFrom[0], c: moveFrom[1], toR: r, toC: c }, state);
+    } else {
+      if (unit) { design.clearDraft(); render(); return; }
+      if (!selectedType) { notice = "請先選擇自己的手牌。"; render(); return; }
+      design.clearInspect();
+      design.setDraft({ kind: "deploy", r, c, type: selectedType, rank: selectedRank }, state);
     }
-    if (!selectedType) { notice = "請先選擇自己的手牌"; render(); return; }
-    sendIntent({ kind: "deploy", r, c, type: selectedType, rank: selectedRank });
+    notice = ""; render();
   }
 
   // 每次重繪都依當下容器重算棋盤尺寸，不倚賴 ResizeObserver 的觸發時機
@@ -335,120 +375,42 @@
 
   function renderBoard() {
     sizeBoard();
-    boardEl.innerHTML = "";
-    for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
-      const cell = document.createElement("div");
-      cell.className = "cell";
-      const finalOwner = state?.gameOver ? UI.finalFiveOwner(state, r, c) : 0;
-      if (finalOwner) cell.classList.add(`final-five-p${finalOwner}`);
-      const unit = state?.board?.[r]?.[c];
-      if (unit) {
-        const div = document.createElement("div");
-        div.className = `unit p${unit.pid}`;
-        div.dataset.unitId = String(unit.id);
-        div.innerHTML = UI.unitHtml(unit);
-        div.title = UI.unitTitle(unit);
-        cell.appendChild(div);
-      }
-      cell.addEventListener("click", () => onCell(r, c));
-      cell.addEventListener("mouseenter", () => { hoverCell = [r, c]; renderForecast(); });
-      cell.addEventListener("mouseleave", () => { hoverCell = null; renderForecast(); });
-      boardEl.appendChild(cell);
-    }
+    design.renderBoard(state, {
+      onCell,
+      onHover: cell => { hoverCell = cell; renderForecast(); },
+    });
   }
 
   function renderHand() {
-    handEl.innerHTML = "";
-    $("#rankRow").innerHTML = "";
-    if (!state) {
-      $("#handTitle").textContent = "等待房間開始";
-      $("#deckInfo").textContent = "";
-      return;
-    }
-    const counts = { sword: 0, shield: 0, spear: 0 };
-    state.own.hand.forEach(type => counts[type]++);
-    const cat = catalog();
-    const blocked = placementBlockReason();
-    state.own.hand.forEach(type => {
-      const button = document.createElement("button");
-      button.className = `card ${selectedType === type ? "sel" : ""}`;
-      button.disabled = Boolean(blocked);
-      button.title = blocked;
-      button.innerHTML = UI.handCardHtml(type, cat);
-      // 點擊仍然只是「選牌」，原本的選牌→部署流程完全不變。
-      button.onclick = () => { selectedType = type; selectedRank = 1; artilleryMode = false; render(); };
-      // PC 用 hover 預覽；touch 沒有 hover，靠上面的點選同步更新同一份詳情。
-      button.addEventListener("mouseenter", () => { hoverType = type; renderCardDetail(); });
-      button.addEventListener("mouseleave", () => { hoverType = null; renderCardDetail(); });
-      button.addEventListener("focus", () => { hoverType = type; renderCardDetail(); });
-      button.addEventListener("blur", () => { hoverType = null; renderCardDetail(); });
-      handEl.appendChild(button);
+    design.renderHand({
+      view: state, selectedType, selectedRank, blocked: placementBlockReason(),
+      onSelect: type => {
+        selectedType = type; selectedRank = 1; artilleryMode = false;
+        moveFrom = null; hoverType = null; notice = ""; render();
+      },
+      onRank: rank => { selectedRank = rank; hoverType = null; notice = ""; render(); },
+      onInspect: type => { hoverType = type; renderCardDetail(); },
     });
-    $("#handTitle").textContent = `你是 P${selfPid}｜自己的手牌（${state.own.hand.length}/5）`;
-    $("#deckInfo").textContent = `自己的牌庫 ${state.own.deckCount}｜冷卻 ${state.own.cooldown.map(item => `${NAMES[item.type]}:${item.turns}`).join("、") || "無"}`;
-    if (selectedType) {
-      // ★★★ 已停用；★★ 每兵種同時只能有一隻在場。
-      const eliteOut = state.board.flat()
-        .some(unit => unit && unit.pid === selfPid && unit.rank === 2 && unit.type === selectedType);
-      for (const [rank, cost] of [[1, 1], [2, 3]]) {
-        const button = document.createElement("button");
-        const capped = rank === 2 && eliteOut;
-        const reason = UI.rankDisabledReason({ turnReason: blocked, count: counts[selectedType], cost,
-          capped, typeName: NAMES[selectedType] });
-        button.className = `btn ${selectedRank === rank ? "active" : ""}`;
-        button.textContent = capped
-          ? `★★（場上已有${NAMES[selectedType]}）`
-          : reason ? `${"★".repeat(rank)}｜${reason}` : `${"★".repeat(rank)}（${cost}張）`;
-        button.disabled = Boolean(reason);
-        button.title = reason;
-        button.onclick = () => { selectedRank = rank; render(); };
-        $("#rankRow").appendChild(button);
-      }
-      if (selectedRank === 2 && eliteOut) selectedRank = 1;   // 被上限擋下時自動退回★，不卡住行動
-    }
     renderCardDetail();
   }
 
-
-  // ---- 攻擊指示：滑鼠移到格子上就用正式引擎預演一次 ----
-  // 盤面是公開資訊，前端用同一份 game_engine.js 重跑一次公開運算，不涉及隱藏資訊。
+  // 炮擊點選後維持預覽；交戰演出仍只讀取伺服器的結算事件。
   let hoverCell = null;
-
   function renderForecast() {
     const layer = $("#forecastLayer");
-    if (!layer || !boardEl) return;
     layer.innerHTML = "";
-    if (pendingCombat || combatPlayback.active()) return;
-    const board = state?.board;
-    if (!hoverCell || !board) return;
-    const [r, c] = hoverCell;
-    if (artilleryMode && state.artilleryRules) {
+    if (!state || pendingCombat || combatPlayback.active()) return;
+    const draft = design.draft();
+    const target = draft?.kind === "artillery" ? [draft.r, draft.c] : hoverCell;
+    if (artilleryMode && ownTurn() && target && state.artilleryRules) {
       UI.drawArtillery(layer, boardEl,
-        UI.forecastArtillery(board, r, c, state.artilleryRules, selfPid));
-      return;
+        UI.forecastArtillery(state.board, ...target, state.artilleryRules, selfPid));
     }
-    let ghost = null;
-    if (!board[r][c]) {
-      const stats = globalThis.FiveLineEngine?.baseStats(selectedType, selectedRank);
-      if (!selectedType || !ownTurn() || state.deploymentCommitted || !stats) return;
-      ghost = { r, c, unit: { id: -1, pid: selfPid, type: selectedType, rank: selectedRank,
-        cards: selectedRank === 2 ? 3 : 1, hp: stats.maxHp, maxHp: stats.maxHp, atk: stats.atk } };
-    }
-    const view = UI.forecast(board, ghost);
-    const focus = UI.focusOn(view, r, c);
-    if (!view || !focus) return;
-    if (!focus.outgoing.length && !focus.incoming.length) return;
-    UI.drawForecast(layer, boardEl, view, focus);
   }
 
-  // 卡牌詳情固定在手牌下方，不浮動、不會蓋住棋盤操作區。
   function renderCardDetail() {
-    // 觸控裝置沒有 hover，點選是它唯一能叫出大卡的方式，所以保留
-    // selectedType 當後備；但在有 hover 的裝置上不能這樣，否則選完牌
-    // 大卡會一直蓋在棋盤上擋住落子——點完牌滑鼠還在該張牌上所以仍看得到，
-    // 一往棋盤移動 mouseleave 就會把它收起來。
-    const noHover = typeof matchMedia === "function" && matchMedia("(hover: none)").matches;
-    UI.renderCardDetail($("#cardDetail"), hoverType || (noHover ? selectedType : null), catalog());
+    const type = hoverType || selectedType;
+    design.detail(type, type === selectedType ? selectedRank : 1, catalog(), state?.eliteCardCost);
   }
 
   function renderLogs() {
@@ -685,9 +647,9 @@
     $("#selfRole").textContent = `P${selfPid}｜你`;
     $("#opponentName").textContent = opponentSeat?.nickname || "對手";
     $("#opponentRole").textContent = `P${opponentPid}｜對手`;
-    $("#selfHandCount").textContent = String(state.own.hand.length);
+    $("#selfHandCount").textContent = `手牌 ${state.own.hand.length}`;
     $("#opponentHandCount").textContent = String(state.opponent.handCount);
-    $("#selfArtillery").textContent = String(state.artillery[selfPid]);
+    $("#selfArtillery").textContent = `炮擊 ${state.artillery[selfPid]}`;
     $("#opponentArtillery").textContent = String(state.artillery[opponentPid]);
     $("#opponentStatusDot").className = `statusDot ${opponentConnected ? "online" : "offline"}`;
     $("#opponentConnectionText").textContent = opponentConnected ? "已連線"
@@ -696,6 +658,7 @@
 
   function render() {
     syncCombatCue();
+    design.sync(state, turnBlockReason());
     setConnectionBadge("#socketStatus");
     setConnectionBadge("#gameSocketStatus");
     const inGame = Boolean(state);
@@ -721,6 +684,7 @@
     joinButton.title = connected ? "" : "尚未連上伺服器";
     if (seated && !inGame) renderWaitingRoom();
     if (!state) {
+      design.update({ view: null });
       $("#resultOverlay").classList.add("hidden");
       updateTurnTimer();
       return;
@@ -750,24 +714,17 @@
     badge.title = phase.full || phase.text; }
     const perspective = state.current === selfPid ? "輪到你" : "輪到對手";
     $("#turnText").textContent = state.gameOver ? "對局結束"
-      : `${perspective}｜P${state.current}｜第 ${state.roundNo} 輪`;
+      : perspective;
     $("#turnText").title = `P${state.firstPlayer} 先行${state.turnOrderMode === "fixed" ? "｜本局固定順序" : ""}`;
     const blocked = turnBlockReason();
-    const actionText = state.gameOver
-      ? UI.resultLabel(state)
-      : blocked ? `操作暫停：${blocked}。手牌與炮擊會在可操作時恢復。`
-      : state.current === selfPid && state.deploymentCommitted
-        ? state.artilleryUsedThisTurn
-          ? "主要行動與炮擊已完成：請按「結束回合」。"
-          : "主要行動已完成：仍可炮擊，然後按「結束回合」。"
-      : state.current === selfPid && moveMode()
-        ? (moveFrom ? `已選 (${moveFrom[0] + 1},${moveFrom[1] + 1})，點相鄰空格移動`
-            : "手牌已用盡：本回合改為移動，點自己的一顆棋再點相鄰空格")
-      : state.current === selfPid && state.canAct === false
-        ? "目前已無法部署或移動：請按「結束回合」。"
-      : state.current === selfPid
-        ? state.artilleryUsedThisTurn ? "輪到你：炮擊已使用，必須完成部署" : "輪到你：可先炮擊，然後部署"
-      : "等待對方完成操作";
+    const actionText = state.gameOver ? UI.resultLabel(state)
+      : blocked ? `操作暫停：${blocked}。`
+      : artilleryMode ? "炮擊模式：點選中心預覽範圍，再按確認。"
+      : state.deploymentCommitted ? "主要行動已完成：仍可炮擊，然後按「結束回合」。"
+      : moveMode() ? (moveFrom ? "點選標示的合法空格預覽，再按確認移動。" : "手牌用盡：選擇自己的棋子移動。")
+      : state.canAct === false ? "目前無法部署或移動，請按「結束回合」。"
+      : selectedType ? `已選 ${"★".repeat(selectedRank)}${NAMES[selectedType]}，點空格預覽，再按確認部署。`
+      : "先選手牌，再選棋格；確認後才會部署。";
     $("#turnStatus").textContent = notice ? `${actionText}\n${notice}` : actionText;
     const artilleryButton = $("#artilleryBtn");
     const artilleryBase = `炮擊（P${selfPid} 剩 ${state.artillery[selfPid]} 發）`;
@@ -786,6 +743,8 @@
     endTurnButton.className = `btn endTurnBtn ${endDisabledReason ? "" : "ready"}`.trim();
     updateTurnTimer();
     renderResultOverlay();
+    design.update({ view: state, blocked: turnBlockReason(), selectedType, selectedRank,
+      artilleryMode, moveFrom, confirm: confirmAction, cancel: cancelSelection });
     startPendingCombat();
   }
 
@@ -847,7 +806,12 @@
   document.addEventListener("keydown", event => {
     if (event.key === "Escape") closePasswordPrompt();
   });
-  $("#artilleryBtn").onclick = () => { if (ownTurn()) { artilleryMode = !artilleryMode; selectedType = null; render(); } };
+  $("#artilleryBtn").onclick = () => {
+    if (artilleryReason()) return;
+    design.clearDraft(); design.clearInspect();
+    artilleryMode = !artilleryMode; hoverCell = null;
+    selectedType = null; hoverType = null; moveFrom = null; notice = ""; render();
+  };
   $("#endTurnBtn").onclick = () => {
     if (!endTurnReason()) {
       artilleryMode = false;

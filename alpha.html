@@ -2,15 +2,16 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,viewport-fit=cover">
   <title>五連戰線｜連線對戰</title>
   <link rel="icon" href="/icon-192.png">
   <link rel="stylesheet" href="/alpha_board.css?v=18">
   <link rel="stylesheet" href="/game_shell.css?v=17">
   <link rel="stylesheet" href="/local_layout.css?v=18">
   <link rel="stylesheet" href="/online_layout.css?v=18">
+  <link rel="stylesheet" href="/battlefield.css?v=1">
 </head>
-<body>
+<body class="battleDesign">
 <section id="lobbyScreen" class="lobbyScreen">
   <header class="lobbyHeader">
     <div class="lobbyBrand">
@@ -19,7 +20,7 @@
     </div>
     <div class="lobbyHeaderActions">
       <span id="socketStatus" class="connection wait">連線中…</span>
-      <a class="btn modeLink" href="/local">🎮 單機測試</a>
+      <a class="btn modeLink" href="/local">單機對局</a>
       <button id="entryHelpBtn" class="btn" type="button">？ 規則</button>
     </div>
   </header>
@@ -98,105 +99,7 @@
 </section>
 
 <section id="gameScreen" class="gameScreen hidden">
-  <div class="app">
-    <header class="top gameTop">
-      <h1>五連戰線｜連線對戰</h1>
-      <strong id="gameRoomName" class="gameRoomName"></strong>
-      <span id="gameRoomCode" class="pill"></span>
-      <span id="gameSocketStatus" class="connection wait">連線中…</span>
-      <span class="pill">9×9</span>
-      <span class="pill counterHint" title="盾克劍、劍克槍、槍克盾">
-        相剋　<b>🛡盾</b> → <b>⚔劍</b> → <b>🔱槍</b> → <b>🛡盾</b>
-      </span>
-      <button id="helpBtn" class="btn helpBtn" type="button">？ 規則</button>
-    </header>
-
-    <div class="layout onlineGameLayout">
-      <div class="gameCol onlineGameCol">
-        <div id="opponentBand" class="playerBand opponentBand">
-          <span id="opponentAvatar" class="playerAvatar neutralAvatar">P?</span>
-          <div class="bandIdentity">
-            <strong id="opponentName">等待對手</strong>
-            <span id="opponentRole">對手</span>
-          </div>
-          <div class="bandStat"><span>手牌</span><strong id="opponentHandCount">—</strong></div>
-          <div class="bandStat"><span>炮擊</span><strong id="opponentArtillery">—</strong></div>
-          <div class="bandConnection"><span id="opponentStatusDot" class="statusDot"></span><span id="opponentConnectionText">未連線</span></div>
-        </div>
-
-        <div class="boardWrap">
-          <div id="board" class="board"></div>
-          <svg id="forecastLayer" class="forecastLayer" aria-hidden="true"></svg>
-          <div id="combatStage" class="combatStage hidden">
-            <svg id="combatLayer" class="combatLayer" aria-hidden="true"></svg>
-            <div id="combatPieces" class="combatPieces" aria-hidden="true"></div>
-            <div class="combatPlaybackHud">
-              <span id="combatStepLabel" class="combatStepLabel" aria-live="polite"></span>
-              <button id="skipCombatBtn" class="btn skipCombatBtn" type="button">跳過演出</button>
-            </div>
-          </div>
-        </div>
-
-        <div id="selfBand" class="playerBand selfBand turnSection">
-          <span id="selfAvatar" class="playerAvatar neutralAvatar">P?</span>
-          <div class="bandIdentity">
-            <strong id="selfName">你</strong>
-            <span id="selfRole">玩家</span>
-          </div>
-          <div class="bandTurn">
-            <div class="turnLine">
-              <div id="turnText" class="turn" aria-live="polite"></div>
-              <div id="turnTimer" class="turnTimer" aria-live="off">—</div>
-            </div>
-            <div id="phaseBadge" class="phaseBadge"></div>
-          </div>
-          <div id="turnStatus" class="status actionStatus bandActionStatus"></div>
-          <div class="selfResources">
-            <div class="bandStat"><span>手牌</span><strong id="selfHandCount">—</strong></div>
-            <div class="bandStat"><span>炮擊</span><strong id="selfArtillery">—</strong></div>
-          </div>
-          <div class="turnActions">
-            <button id="artilleryBtn" class="btn artBtn ready" disabled>炮擊</button>
-            <button id="endTurnBtn" class="btn endTurnBtn" type="button" disabled>結束回合</button>
-          </div>
-        </div>
-
-        <div class="handPanel">
-          <div class="handHeader">
-            <strong id="handTitle">等待房間開始</strong>
-            <span class="meta" id="deckInfo"></span>
-            <span class="handHint">滑鼠移到手牌（或點選）可看兵種大卡</span>
-          </div>
-          <div id="hand" class="hand"></div>
-          <div id="rankRow" class="rankRow"></div>
-          <div id="cardDetail" class="cardDetail idle"></div>
-        </div>
-      </div>
-
-    </div>
-
-    <details id="matchMenu" class="matchMenu">
-      <summary class="btn matchMenuSummary">⋯ 對局選單</summary>
-      <div class="matchMenuPanel">
-        <button id="logDrawerToggle" class="btn" type="button"
-          aria-controls="logDrawer" aria-expanded="false">戰鬥紀錄</button>
-        <button id="leaveRoomBtn" class="btn danger" type="button">棄賽並離開</button>
-      </div>
-    </details>
-
-    <div id="logDrawer" class="logDrawer hidden" aria-hidden="true">
-      <aside class="logDrawerPanel logSection" role="dialog" aria-modal="true" aria-labelledby="logDrawerTitle">
-        <div class="logDrawerHead">
-          <div>
-            <span class="drawerEyebrow">本局事件</span>
-            <h2 id="logDrawerTitle">戰鬥紀錄</h2>
-          </div>
-          <button id="logDrawerClose" class="btn" type="button">關閉</button>
-        </div>
-        <div id="log" class="log" aria-live="polite"></div>
-      </aside>
-    </div>
-  </div>
+  <div id="battlefield" class="battlefield"></div>
 </section>
 
 <div id="passwordOverlay" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="passwordTitle">
@@ -213,7 +116,7 @@
   </div>
 </div>
 
-<div id="rulesOverlay" class="overlay hidden">
+<div id="rulesOverlay" class="overlay hidden" role="dialog" aria-modal="true" aria-label="規則與兵種說明">
   <div class="overlayBox rulesBox">
     <div class="rulesHead">
       <h2>規則與兵種說明</h2>
@@ -237,8 +140,9 @@
   </div>
 </div>
 
-<script src="/game_engine.js"></script>
-<script src="/alpha_ui.js"></script>
-<script src="/alpha_client.js"></script>
+<script src="/game_engine.js?v=20260908"></script>
+<script src="/alpha_ui.js?v=20260908"></script>
+<script src="/battlefield.js?v=1"></script>
+<script src="/alpha_client.js?v=20260908"></script>
 </body>
 </html>

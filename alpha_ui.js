@@ -49,7 +49,7 @@
   function unitHtml(unit) {
     const pct = Math.max(0, Math.min(100, unit.hp / unit.maxHp * 100));
     return `<span class="stars">${"★".repeat(unit.rank)}</span>`
-      + `<span class="unitIcon">${ICONS[unit.type]}</span>`
+      + `<span class="unitIcon">${globalThis.BattleDesign?.icon(unit.type) || ICONS[unit.type]}</span>`
       + `<small>${Math.max(0, Math.round(unit.hp))}/${unit.maxHp}</small>`
       + `<span class="hpbar"><i style="width:${pct}%"></i></span>`;
   }
@@ -57,17 +57,24 @@
     `P${unit.pid} ${NAMES[unit.type]} ${"★".repeat(unit.rank)}｜HP ${Math.round(unit.hp)}/${unit.maxHp}｜攻 ${unit.atk}`;
 
   // 卡牌詳情（固定區塊，不浮動、不蓋住棋盤）
-  function cardDetailHtml(type, catalog) {
-    if (!type || !catalog) return "滑鼠移到手牌上（或點選手牌）可看該兵種的詳細能力。";
+  function cardDetailHtml(type, catalog, rank = 1, eliteCost, unit) {
+    if (!type || !catalog) return '<div class="detailPlaceholder"><span class="detailEyebrow">兵種圖鑑</span><h2>選一張牌，開始布局</h2><p>點選手牌或棋子，查看生命、攻擊與能力。</p></div>';
     const info = catalog[type];
-    const one = info.ranks[1], two = info.ranks[2];
-    const twoAtk = two.attacks ? String(two.atk) : "—（不主動攻擊）";
+    const stats = info.ranks[rank];
+    const attack = stats.attacks === false ? "—" : (unit?.atk ?? stats.atk);
+    const health = unit ? `${Math.max(0, Math.round(unit.hp))}/${unit.maxHp}` : stats.maxHp;
+    const art = globalThis.BattleDesign?.portrait(type, rank);
+    const ability = rank > 1 ? ELITE_ABILITY[type] : ABILITY[type];
+    const cost = eliteCost ?? globalThis.FiveLineEngine?.GameEngine.deploymentRules().ranks.find(option => option.rank === 2)?.cost;
     const list = lines => `<ul>${lines.map(item => `<li>${item}</li>`).join("")}</ul>`;
-    return `<div class="detailHead">${ICONS[type]} ${info.name}</div>`
-      + `<div class="detailMeta">★　HP ${one.maxHp}／攻 ${one.atk}　｜　★★　HP ${two.maxHp}／攻 ${twoAtk}<br>`
-      + `克制：${NAMES[info.counters]}　｜　被克制：${NAMES[info.counteredBy]}　｜　★★ 需要 3 張同兵種卡</div>`
-      + `<div class="detailAbility"><b>${ABILITY[type].tag}</b>${list(ABILITY[type].lines)}</div>`
-      + `<div class="detailAbility"><b>★★ ${ELITE_ABILITY[type].tag}</b>${list(ELITE_ABILITY[type].lines)}</div>`;
+    return (art ? `<div class="detailPortrait"><img src="${art}" alt="${rank > 1 ? "精英" : ""}${info.name}兵插畫" decoding="async"></div>` : "")
+      + `<div class="detailContent"><span class="detailEyebrow">${unit ? `場上棋子 · P${unit.pid}` : rank > 1 ? "精英兵種" : "普通兵種"}</span>`
+      + `<div class="detailHead"><h2>${info.name}兵</h2><span>${"★".repeat(rank)}</span></div>`
+      + `<div class="detailStats"><span>生命 <strong>${health}</strong></span><span>攻擊 <strong>${attack}</strong></span></div>`
+      + `<div class="detailAbility"><b>${ability.tag}</b>${list(ability.lines)}</div>`
+      + (rank > 1 && type !== "shield" ? `<div class="detailAbility inherited"><b>保留${ABILITY[type].tag}</b>${list(ABILITY[type].lines)}</div>` : "")
+      + `<div class="detailMeta">克制 ${NAMES[info.counters]}　·　受制於 ${NAMES[info.counteredBy]}`
+      + (cost != null ? `<br>★★ 消耗 ${cost} 張同兵種手牌` : "") + "</div></div>";
   }
 
   // 規則視窗
@@ -439,7 +446,7 @@
       stars.textContent = "★".repeat(unit.rank || 1);
       const icon = document.createElement("span");
       icon.className = "combatPieceIcon";
-      icon.textContent = ICONS[unit.type] || "●";
+      icon.innerHTML = globalThis.BattleDesign?.icon(unit.type) || ICONS[unit.type] || "●";
       piece.append(stars, icon);
       place(piece, point);
       piecesEl.appendChild(piece);
@@ -627,13 +634,11 @@
     return { play, skip, reset, active: () => running };
   }
 
-  // 大卡詳情：沒有目標時整張卡隱藏（.idle），有目標才浮出。
-  // 因為 .cardDetail 是 absolute，出現與消失都不會推擠版面。
-  function renderCardDetail(box, type, catalog) {
+  // 詳情保留固定位置；手機透過同一份內容開啟詳情視窗。
+  function renderCardDetail(box, type, catalog, rank = 1, eliteCost, unit) {
     if (!box) return;
-    if (!type || !catalog) { box.classList.add("idle"); box.innerHTML = ""; return; }
-    box.classList.remove("idle");
-    box.innerHTML = cardDetailHtml(type, catalog);
+    box.classList.toggle("idle", !type || !catalog);
+    box.innerHTML = cardDetailHtml(type, catalog, rank, eliteCost, unit);
   }
 
   // 規則視窗的開關（兩邊共用；只切 CSS class，不動遊戲狀態）
