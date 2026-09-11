@@ -132,5 +132,207 @@
 <script src="/alpha_ui.js"></script>
 <script src="/local_client.js"></script>
 <script src="/sw.js?action-feedback=1"></script>
+<script>
+(() => {
+  const DONE_KEY = "five-line-local-tutorial-v1-done";
+  const SNOOZE_KEY = "five-line-local-tutorial-v1-snoozed";
+  if (globalThis.__fiveLineLocalTutorial) return;
+  globalThis.__fiveLineLocalTutorial = true;
+
+  const style = document.createElement("style");
+  style.textContent = `
+    .tutorialSpotlight{position:fixed;z-index:88;pointer-events:none;border:3px solid #f0cf7c;border-radius:14px;box-shadow:0 0 0 3px rgba(240,207,124,.18),0 0 28px rgba(240,207,124,.5);transition:left .18s ease,top .18s ease,width .18s ease,height .18s ease,opacity .15s ease}
+    .tutorialCard{position:fixed;z-index:90;width:min(390px,calc(100vw - 24px));padding:16px;border:1px solid #806d45;border-radius:16px;background:linear-gradient(145deg,rgba(31,29,24,.98),rgba(17,18,17,.98));box-shadow:0 20px 60px rgba(0,0,0,.62),inset 0 1px 0 rgba(255,255,255,.04);color:#eee7d7}
+    .tutorialCard.top{top:18px;right:18px}.tutorialCard.bottom{right:18px;bottom:18px}.tutorialEyebrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;color:#b9a77f;font-size:10px;font-weight:900;letter-spacing:.14em}.tutorialTitle{margin:0 0 8px;color:#fff3c4;font-size:19px;line-height:1.3}.tutorialText{min-height:70px;margin:0;color:#d9d2c4;font-size:13px;line-height:1.75}.tutorialHint{margin-top:9px;padding:8px 10px;border:1px dashed #655a44;border-radius:9px;background:rgba(240,207,124,.05);color:#bdb29d;font-size:11px;line-height:1.55}.tutorialActions{display:grid;grid-template-columns:auto 1fr auto auto;gap:7px;align-items:center;margin-top:13px}.tutorialActions .btn{min-height:38px}.tutorialProgress{color:#978c79;font-size:11px;text-align:center}.tutorialSkip{border-color:#5a5143;color:#b7ad9c}.tutorialReplayBtn{white-space:nowrap}
+    @media(max-width:600px){.tutorialCard.top,.tutorialCard.bottom{left:10px;right:10px;top:auto;bottom:10px;width:auto}.tutorialActions{grid-template-columns:1fr 1fr}.tutorialProgress{grid-column:1/-1;grid-row:1}.tutorialActions .btn{width:100%}.tutorialSpotlight{border-width:2px}}
+    @media(prefers-reduced-motion:reduce){.tutorialSpotlight{transition:none}}
+  `;
+  document.head.appendChild(style);
+
+  const steps = [
+    {
+      target: ".turnFlowGuide, .top",
+      title: "先看懂一回合",
+      text: "每回合的核心很簡單：先做主要行動，再決定要不要炮擊，最後結束回合；雙方都完成後才會統一進入戰鬥結算。",
+      hint: "上方流程條會一直告訴你目前走到哪一步，不需要背流程。",
+    },
+    {
+      target: ".handPanel",
+      title: "第一步：從手牌選兵種",
+      text: "點一張劍、盾或槍，再選你要部署的星級。把滑鼠移到卡片上，也可以先看該兵種與菁英能力。",
+      hint: "★★ 會消耗更多同兵種手牌，所以不一定每次都要升階。",
+    },
+    {
+      target: ".boardWrap",
+      title: "第二步：選一個空格部署",
+      text: "選好手牌後，點棋盤空格就能部署。真正的勝利條件是形成『戰鬥結算後仍然存活的五連』，不是一放下去就立刻獲勝。",
+      hint: "這裡只教你操作，不會自動幫你找五連威脅或最佳落點。",
+    },
+    {
+      target: "#artilleryBtn",
+      title: "炮擊是可選的額外手段",
+      text: "炮擊可以在主要行動前或後使用，但不會取代部署／移動。開啟炮擊後先看範圍與預測，再決定要不要真的發射。",
+      hint: "炮擊會誤傷自己的單位，所以不要只看敵人。",
+    },
+    {
+      target: "#endTurnBtn",
+      title: "做完主要行動，再結束回合",
+      text: "部署或移動完成後，結束回合按鈕才會進入可用狀態。按下後就把行動權交出去；雙方都結束才會開始全場戰鬥。",
+      hint: "如果按鈕不能按，停用原因會直接寫在按鈕或狀態區。",
+    },
+    {
+      target: ".counterHint, .turnFlowGuide",
+      title: "最後記兩件事就能開始玩",
+      text: "兵種有循環克制：盾克劍、劍克槍、槍克盾。戰鬥時畫面會依序顯示攻擊、護衛、傷害與特殊效果，你只要觀察哪些棋在結算後活下來。",
+      hint: "忘記規則時按『？ 規則』；之後也能從『對局選單 → 新手引導』重新看這套導覽。",
+    },
+  ];
+
+  let index = 0;
+  let open = false;
+  let currentTarget = null;
+
+  const spotlight = document.createElement("div");
+  spotlight.className = "tutorialSpotlight";
+  spotlight.hidden = true;
+
+  const card = document.createElement("section");
+  card.className = "tutorialCard bottom";
+  card.hidden = true;
+  card.setAttribute("role", "dialog");
+  card.setAttribute("aria-modal", "false");
+  card.setAttribute("aria-label", "五連戰線新手引導");
+
+  const eyebrow = document.createElement("div");
+  eyebrow.className = "tutorialEyebrow";
+  const eyebrowText = document.createElement("span");
+  eyebrowText.textContent = "新手引導";
+  const laterButton = document.createElement("button");
+  laterButton.type = "button";
+  laterButton.className = "btn tutorialSkip";
+  laterButton.textContent = "稍後再看";
+  eyebrow.append(eyebrowText, laterButton);
+
+  const title = document.createElement("h2");
+  title.className = "tutorialTitle";
+  const text = document.createElement("p");
+  text.className = "tutorialText";
+  const hint = document.createElement("div");
+  hint.className = "tutorialHint";
+
+  const actions = document.createElement("div");
+  actions.className = "tutorialActions";
+  const back = document.createElement("button");
+  back.type = "button";
+  back.className = "btn";
+  back.textContent = "上一步";
+  const progress = document.createElement("span");
+  progress.className = "tutorialProgress";
+  const skip = document.createElement("button");
+  skip.type = "button";
+  skip.className = "btn tutorialSkip";
+  skip.textContent = "跳過";
+  const next = document.createElement("button");
+  next.type = "button";
+  next.className = "btn";
+  next.textContent = "下一步";
+  actions.append(back, progress, skip, next);
+  card.append(eyebrow, title, text, hint, actions);
+  document.body.append(spotlight, card);
+
+  function findTarget(selector) {
+    for (const part of selector.split(",")) {
+      const node = document.querySelector(part.trim());
+      if (node && node.getClientRects().length) return node;
+    }
+    return null;
+  }
+
+  function position() {
+    if (!open || !currentTarget) return;
+    const rect = currentTarget.getBoundingClientRect();
+    const pad = 6;
+    spotlight.style.left = `${Math.max(4, rect.left - pad)}px`;
+    spotlight.style.top = `${Math.max(4, rect.top - pad)}px`;
+    spotlight.style.width = `${Math.min(innerWidth - Math.max(4, rect.left - pad) - 4, rect.width + pad * 2)}px`;
+    spotlight.style.height = `${Math.min(innerHeight - Math.max(4, rect.top - pad) - 4, rect.height + pad * 2)}px`;
+    const targetIsLow = rect.top + rect.height / 2 > innerHeight / 2;
+    card.classList.toggle("top", targetIsLow);
+    card.classList.toggle("bottom", !targetIsLow);
+  }
+
+  function render() {
+    if (!open) return;
+    const step = steps[index];
+    currentTarget = findTarget(step.target);
+    title.textContent = step.title;
+    text.textContent = step.text;
+    hint.textContent = step.hint;
+    progress.textContent = `${index + 1} / ${steps.length}`;
+    back.disabled = index === 0;
+    next.textContent = index === steps.length - 1 ? "開始玩" : "下一步";
+    spotlight.hidden = !currentTarget;
+    card.hidden = false;
+    position();
+  }
+
+  function close({ done = false, snooze = false } = {}) {
+    open = false;
+    card.hidden = true;
+    spotlight.hidden = true;
+    currentTarget = null;
+    if (done) localStorage.setItem(DONE_KEY, "1");
+    if (snooze) sessionStorage.setItem(SNOOZE_KEY, "1");
+  }
+
+  function start({ manual = false } = {}) {
+    if (!manual && (localStorage.getItem(DONE_KEY) === "1" || sessionStorage.getItem(SNOOZE_KEY) === "1")) return;
+    index = 0;
+    open = true;
+    render();
+    document.querySelector("#matchMenu")?.removeAttribute("open");
+  }
+
+  back.addEventListener("click", () => {
+    if (index > 0) index -= 1;
+    render();
+  });
+  next.addEventListener("click", () => {
+    if (index >= steps.length - 1) {
+      close({ done: true });
+      return;
+    }
+    index += 1;
+    render();
+  });
+  skip.addEventListener("click", () => close({ done: true }));
+  laterButton.addEventListener("click", () => close({ snooze: true }));
+  document.addEventListener("keydown", event => {
+    if (!open || event.key !== "Escape") return;
+    close({ snooze: true });
+  });
+  globalThis.addEventListener("resize", position);
+  globalThis.addEventListener("scroll", position, true);
+
+  function addReplayButton() {
+    const panel = document.querySelector(".matchMenuPanel");
+    if (!panel || panel.querySelector(".tutorialReplayBtn")) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "btn tutorialReplayBtn";
+    button.textContent = "新手引導";
+    button.addEventListener("click", () => start({ manual: true }));
+    const sound = panel.querySelector(".soundToggleBtn");
+    if (sound) panel.insertBefore(button, sound);
+    else panel.appendChild(button);
+  }
+
+  addReplayButton();
+  const menuPanel = document.querySelector(".matchMenuPanel");
+  if (menuPanel) new MutationObserver(addReplayButton).observe(menuPanel, { childList: true });
+
+  setTimeout(() => start(), 700);
+})();
+</script>
 </body>
 </html>
