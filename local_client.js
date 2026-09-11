@@ -1,5 +1,5 @@
 // /local 單機測試。規則完全來自正式的 game_engine.js，這裡只做操作與顯示。
-// 兩種模式維持原本用途：對電腦（P2 由簡單啟發式代打）與本機雙人（同一台電腦輪流操作）。
+// 兩種模式維持原本用途：對電腦（P2 由策略 AI 代打）與本機雙人（同一台電腦輪流操作）。
 (() => {
   const FiveLine = globalThis.FiveLineEngine;
   const { GameEngine, ALPHA_TURN_ORDER } = FiveLine;
@@ -382,8 +382,7 @@
           : "炮擊模式：移到棋盤上可預覽 3×3 範圍與傷害。")
         : selectedType ? `已選 ${"★".repeat(selectedRank)}${NAMES[selectedType]}，點空格部署。`
           : "先點手牌選擇兵種，再點棋盤空格部署。";
-    $("#status").textContent = notice ? `${text}
-${notice}` : text;
+    $("#status").textContent = notice ? `${text}\n${notice}` : text;
   }
 
   function updateTurnTimer() {
@@ -452,7 +451,9 @@ ${notice}` : text;
     act({ kind: "deploy", r, c, type: selectedType, rank: selectedRank });
   }
 
-  // ---- 對電腦模式的簡單啟發式（只使用引擎的公開介面）----
+  // ---- 對電腦模式：標準策略 AI ----
+  // AI 只讀公開盤面與正式引擎介面。候選部署／移動會交給同一份 resolveCombat() 預演，
+  // 炮擊範圍、傷害、★★成本等數值也全部向引擎取得，不在這裡維護第二份規則。
   function scheduleAi() {
     if (mode !== "pve" || finished() || engine.current !== 2) return;
     aiThinking = true;
@@ -460,70 +461,297 @@ ${notice}` : text;
     setTimeout(() => { aiThinking = false; aiMove(); }, 320);
   }
 
-  function lineScore(r, c, pid) {
-    let score = -(Math.abs(r - 4) + Math.abs(c - 4)) * 0.05;
-    for (const [dr, dc] of LINES) for (let off = -4; off <= 0; off++) {
-      let own = 0, enemy = 0, ok = true;
-      for (let k = 0; k < 5; k++) {
-        const rr = r + dr * (off + k), cc = c + dc * (off + k);
-        if (!inB(rr, cc)) { ok = false; break; }
-        const unit = engine.board[rr][cc];
-        if (unit && unit.pid === pid) own++; else if (unit) enemy++;
-      }
-      if (!ok || (own && enemy)) continue;
-      if (!enemy) score += own * own * 1.15 + (own === 4 ? 500 : 0);
-      if (!own) score += 0.95 * (enemy * enemy + (enemy === 4 ? 520 : 0));
+  const AI_PID = 2;
+  const HUMAN_PID = 1;
+  const AI_GHOST_ID = -2002;
+  const AI_TYPES = ["sword", "shield", "spear"];
+  const AI_LINE_WEIGHT = [0, 1, 6, 28, 190, 6000];
+
+  function cloneBoard(board = engine.board) {
+    return board.map(row => row.map(unit => (unit ? { ...unit } : null)));
+  }
+
+  function findById(board, id) {
+    for (let r = 0; r < board.length; r++) for (let c = 0; c < board[r].length; c++) {
+      if (board[r][c]?.id === id) return [r, c];
     }
-    for (const [dr, dc] of ORTHO) {
-      const unit = inB(r + dr, c + dc) && engine.board[r + dr][c + dc];
-      if (unit) score += unit.pid === pid ? 0.25 : 0.4;
+    return null;
+  }
+
+  function removeById(board, id) {
+    const pos = findById(board, id);
+    if (pos) board[pos[0]][pos[1]] = null;
+  }
+
+  function projectAfterCombat(board, view) {
+    const projected = cloneBoard(board);
+    for (const hit of view?.damage || []) {
+      const pos = findById(projected, hit.unitId);
+      if (pos) projected[pos[0]][pos[1]].hp = hit.hpAfter;
+    }
+    for (const item of view?.cleaves || []) {
+      const pos = findById(projected, item.unitId);
+      if (!pos) continue;
+      const unit = projected[pos[0]][pos[1]];
+      projected[pos[0]][pos[1]] = null;
+      projected[item.to.r][item.to.c] = unit;
+      if (item.followUp) {
+        const target = findById(projected, item.followUp.unitId);
+        if (target) projected[target[0]][target[1]].hp = item.followUp.hpAfter;
+      }
+    }
+    for (const item of view?.reflections || []) {
+      const pos = findById(projected, item.unitId);
+      if (pos) projected[pos[0]][pos[1]].hp = item.hpAfter;
+    }
+    for (const death of view?.deaths || []) removeById(projected, death.unit?.id);
+    return projected;
+  }
+
+  function shapeScore(board) {
+    const size = board.length;
+    let score = 0;
+    for (let r = 0; r < size; r++) for (let c = 0; c < size; c++) {
+      for (const [dr, dc] of LINES) {
+        const cells = [];
+        for (let k = 0; k < 5; k++) {
+          const rr = r + dr * k, cc = c + dc * k;
+          if (rr < 0 || cc < 0 || rr >= size || cc >= size) { cells.length = 0; break; }
+          cells.push(board[rr][cc]);
+        }
+        if (!cells.length) continue;
+        let mine = 0, foe = 0;
+        for (const unit of cells) {
+          if (unit?.pid === AI_PID) mine++;
+          else if (unit?.pid === HUMAN_PID) foe++;
+        }
+        if (mine && foe) continue;
+        if (mine) score += AI_LINE_WEIGHT[mine] || 0;
+        else if (foe) score -= (AI_LINE_WEIGHT[foe] || 0) * 1.08;
+      }
     }
     return score;
   }
 
+  function materialValue(unit) {
+    if (!unit) return 0;
+    const hpRatio = unit.maxHp ? Math.max(0, unit.hp) / unit.maxHp : 0;
+    return 22 + (unit.cards || 1) * 14 + hpRatio * 10;
+  }
+
+  function combatScore(view, candidateBoard, focusId = null) {
+    if (!view) return 0;
+    let score = 0;
+    for (const hit of view.damage || []) {
+      const actual = Number(hit.actualDamage ?? hit.damage ?? 0);
+      score += hit.pid === HUMAN_PID ? actual * 0.24 : -actual * 0.28;
+    }
+    for (const death of view.deaths || []) {
+      const value = materialValue(death.unit);
+      score += death.unit?.pid === HUMAN_PID ? value * 1.35 : -value * 1.55;
+    }
+    for (const packet of view.packets || []) {
+      if (!packet.counterBonus) continue;
+      score += packet.from?.pid === AI_PID ? 5 : -5;
+    }
+    for (const cleave of view.cleaves || []) score += cleave.pid === AI_PID ? 18 : -18;
+    for (const reflection of view.reflections || []) {
+      const shieldPos = findById(candidateBoard, reflection.shieldId);
+      const shield = shieldPos ? candidateBoard[shieldPos[0]][shieldPos[1]] : null;
+      score += shield?.pid === AI_PID ? reflection.damage * 0.18 : -reflection.damage * 0.18;
+    }
+    for (const guards of Object.values(view.guards || {})) {
+      for (const guard of guards || []) {
+        const pos = findById(candidateBoard, guard.unitId);
+        const unit = pos ? candidateBoard[pos[0]][pos[1]] : null;
+        score += unit?.pid === AI_PID ? 3 : -3;
+      }
+    }
+    if (focusId !== null) {
+      const died = (view.deaths || []).some(item => String(item.unit?.id) === String(focusId));
+      if (died) score -= 85;
+      else {
+        const ownHit = (view.damage || []).find(item => String(item.unitId) === String(focusId));
+        if (ownHit && ownHit.hpAfter > 0) score += Math.min(14, ownHit.hpAfter * 0.06);
+      }
+    }
+    return score;
+  }
+
+  function centerBias(r, c, board = engine.board) {
+    const mid = (board.length - 1) / 2;
+    return -(Math.abs(r - mid) + Math.abs(c - mid)) * 0.12;
+  }
+
+  function eliteOnBoard(pid, type) {
+    return engine.board.flat().some(unit => unit && unit.pid === pid && unit.rank === 2 && unit.type === type);
+  }
+
+  function handCounts(pid) {
+    const counts = Object.fromEntries(AI_TYPES.map(type => [type, 0]));
+    for (const type of engine.players[pid - 1].hand) if (Object.hasOwn(counts, type)) counts[type]++;
+    return counts;
+  }
+
+  function legalRanks(type, counts) {
+    const ranks = [1];
+    const eliteCost = FiveLine.cardCost(2);
+    if (eliteCost > 0 && counts[type] >= eliteCost && !eliteOnBoard(AI_PID, type)) ranks.push(2);
+    return ranks;
+  }
+
+  function scoreDeployment(r, c, type, rank) {
+    const stats = FiveLine.baseStats(type, rank);
+    if (!stats) return -Infinity;
+    const ghost = {
+      id: AI_GHOST_ID, pid: AI_PID, type, rank, cards: 0,
+      hp: stats.maxHp, maxHp: stats.maxHp, atk: stats.atk,
+    };
+    const candidate = cloneBoard();
+    candidate[r][c] = { ...ghost };
+    const view = UI.forecast(engine.board, { r, c, unit: ghost });
+    const projected = projectAfterCombat(candidate, view);
+    let score = shapeScore(projected) + combatScore(view, candidate, AI_GHOST_ID) + centerBias(r, c);
+
+    const survives = Boolean(findById(projected, AI_GHOST_ID));
+    if (rank === 2) {
+      // ★★不是免費升級：除非更高耐久或菁英能力真的改善局面，否則保留額外手牌。
+      score -= 26;
+      if (survives) score += 7;
+      if (type === "sword" && (view.cleaves || []).some(item => item.unitId === AI_GHOST_ID)) score += 30;
+      if (type === "shield" && (view.reflections || []).some(item => item.shieldId === AI_GHOST_ID)) score += 26;
+      if (type === "spear" && (view.packets || []).some(item => item.from?.unitId === AI_GHOST_ID && item.distance === 2)) score += 18;
+    }
+    if (!survives) score -= 55;
+    return score;
+  }
+
+  function chooseDeployment() {
+    const counts = handCounts(AI_PID);
+    let best = null;
+    for (let r = 0; r < engine.board.length; r++) for (let c = 0; c < engine.board[r].length; c++) {
+      if (engine.board[r][c]) continue;
+      for (const type of AI_TYPES) {
+        if (!counts[type]) continue;
+        for (const rank of legalRanks(type, counts)) {
+          const score = scoreDeployment(r, c, type, rank);
+          if (!best || score > best.score) best = { r, c, type, rank, score };
+        }
+      }
+    }
+    return best;
+  }
+
+  function scoreMove(move) {
+    const candidate = cloneBoard();
+    const [r, c] = move.from, [toR, toC] = move.to;
+    const unit = candidate[r][c];
+    if (!unit) return -Infinity;
+    candidate[toR][toC] = unit;
+    candidate[r][c] = null;
+    const view = UI.forecast(candidate, null);
+    const projected = projectAfterCombat(candidate, view);
+    let score = shapeScore(projected) + combatScore(view, candidate, unit.id) + centerBias(toR, toC, candidate);
+    if (!findById(projected, unit.id)) score -= 45;
+    return score;
+  }
+
+  function chooseMove() {
+    let best = null;
+    for (const move of engine.legalMoves(AI_PID)) {
+      const score = scoreMove(move);
+      if (!best || score > best.score) best = { ...move, score };
+    }
+    return best;
+  }
+
+  function threatBrokenByPlan(threat, plan) {
+    return plan.hits.some(hit => hit.dies && hit.unit?.pid === HUMAN_PID
+      && threat.cells.some(([r, c]) => r === hit.r && c === hit.c));
+  }
+
+  function scoreArtillery(r, c) {
+    const rules = GameEngine.artilleryRules();
+    const plan = UI.forecastArtillery(engine.board, r, c, rules, AI_PID);
+    if (!plan) return null;
+    let score = 0;
+    for (const hit of plan.hits) {
+      if (!hit.unit) continue;
+      const actual = Math.min(Math.max(0, hit.unit.hp), hit.damage);
+      const value = materialValue(hit.unit);
+      if (hit.unit.pid === HUMAN_PID) {
+        score += actual * 0.24;
+        if (hit.dies) score += value * 1.35;
+      } else {
+        score -= actual * 0.32;
+        if (hit.dies) score -= value * 1.65;
+      }
+    }
+
+    let brokenFour = 0, brokenFive = 0;
+    for (const threat of engine.threatWindows(HUMAN_PID).values()) {
+      if (!threatBrokenByPlan(threat, plan)) continue;
+      if (threat.kind === 5) brokenFive++;
+      else brokenFour++;
+    }
+    score += brokenFour * 120 + brokenFive * 900;
+    if (!plan.enemies) score -= 35;
+    return { r, c, plan, score, brokenFour, brokenFive };
+  }
+
+  function chooseArtillery(phase) {
+    const player = engine.players[AI_PID - 1];
+    const rules = GameEngine.artilleryRules();
+    if (!player || player.artillery <= 0 || engine.artilleryUsedThisTurn) return null;
+
+    let best = null;
+    for (let r = 0; r < engine.board.length; r++) for (let c = 0; c < engine.board[r].length; c++) {
+      const candidate = scoreArtillery(r, c);
+      if (candidate && (!best || candidate.score > best.score)) best = candidate;
+    }
+    if (!best) return null;
+
+    const maxAmmo = Math.max(1, Number(rules.perPlayer || player.artillery));
+    const scarcity = 1 - Math.min(1, player.artillery / maxAmmo);
+    const threshold = (phase === "pre" ? 88 : 66) + scarcity * 20;
+    if (best.brokenFive > 0 || best.score >= threshold) return best;
+    return null;
+  }
+
+  function fireAiArtillery(phase) {
+    const shot = chooseArtillery(phase);
+    if (!shot) return false;
+    return engine.artillery(AI_PID, { r: shot.r, c: shot.c, turnId: engine.turnId }).ok;
+  }
+
   function aiMove() {
-    if (finished() || engine.current !== 2) { render(); return; }
-    const player = engine.players[1];
-    if (!engine.canDeploy(2)) {
-      const move = engine.legalMoves(2)[0];
-      if (move) engine.move(2, {
+    if (finished() || engine.current !== AI_PID) { render(); return; }
+
+    // 先處理「現在不打就可能直接輸」或交換價值非常高的炮擊；炮擊後重新評估主行動。
+    fireAiArtillery("pre");
+
+    if (engine.canDeploy(AI_PID)) {
+      const choice = chooseDeployment();
+      if (choice) {
+        let result = engine.deploy(AI_PID, {
+          r: choice.r, c: choice.c, type: choice.type, rank: choice.rank, turnId: engine.turnId,
+        });
+        if (!result.ok && choice.rank === 2) {
+          result = engine.deploy(AI_PID, {
+            r: choice.r, c: choice.c, type: choice.type, rank: 1, turnId: engine.turnId,
+          });
+        }
+      }
+    } else {
+      const move = chooseMove();
+      if (move) engine.move(AI_PID, {
         r: move.from[0], c: move.from[1], toR: move.to[0], toC: move.to[1], turnId: engine.turnId,
       });
-      engine.endTurn(2, { turnId: engine.turnId });
-      render();
-      return;
     }
 
-    let best = null, bestScore = -Infinity;
-    for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
-      if (engine.board[r][c]) continue;
-      const score = lineScore(r, c, 2);
-      if (score > bestScore) { bestScore = score; best = [r, c]; }
-    }
-    if (!best) { render(); return; }
-
-    const counts = { sword: 0, shield: 0, spear: 0 };
-    player.hand.forEach(type => counts[type]++);
-    const [r, c] = best;
-    // 選兵種：優先剋制落點附近的敵人
-    let type = player.hand[0], typeScore = -Infinity;
-    for (const candidate of Object.keys(counts).filter(item => counts[item])) {
-      let score = counts[candidate] * 0.05;
-      for (const [dr, dc] of ORTHO) for (let d = 1; d <= 2; d++) {
-        const unit = inB(r + dr * d, c + dc * d) && engine.board[r + dr * d][c + dc * d];
-        if (!unit) continue;
-        if (unit.pid !== 2 && catalog()[candidate].counters === unit.type) score += 2;
-        break;
-      }
-      if (score > typeScore) { typeScore = score; type = candidate; }
-    }
-    const eliteOut = engine.board.flat()
-      .some(unit => unit && unit.pid === 2 && unit.rank === 2 && unit.type === type);
-    const rank = counts[type] >= 3 && !eliteOut && Math.random() < 0.5 ? 2 : 1;
-
-    const result = engine.deploy(2, { r, c, type, rank, turnId: engine.turnId });
-    if (!result.ok) engine.deploy(2, { r, c, type, rank: 1, turnId: engine.turnId });
-    engine.endTurn(2, { turnId: engine.turnId });
+    // 主行動完成後再看一次盤面；若沒有值得消耗的目標，就保留有限炮擊資源。
+    fireAiArtillery("post");
+    engine.endTurn(AI_PID, { turnId: engine.turnId });
     render();
   }
 
