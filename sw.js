@@ -436,3 +436,307 @@ self.addEventListener('fetch',e=>{
 
   processLogs();
 })();
+
+// ---- 戰鬥命中感與終局完成感：只讀既有戰鬥演出 DOM，不重算任何傷害 ----
+(() => {
+  if (globalThis.__fiveLineCombatFeedback) return;
+  const UI = globalThis.AlphaUI;
+  if (!UI) return;
+  globalThis.__fiveLineCombatFeedback = true;
+
+  const SOUND_KEY = "five-line-sound-enabled";
+  const reduced = typeof matchMedia === "function"
+    && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let audio = null;
+  let lastStep = "";
+  let victoryPlayed = false;
+
+  const board = () => document.querySelector("#board");
+  const stage = () => document.querySelector("#combatStage");
+  const label = () => document.querySelector("#combatStepLabel");
+  const pieces = () => document.querySelector("#combatPieces");
+  const resultOverlay = () => document.querySelector("#resultOverlay");
+
+  const style = document.createElement("style");
+  style.textContent = `
+    .combatFxOverlay{position:absolute;inset:0;z-index:1;overflow:hidden;pointer-events:none;border-radius:8px}
+    .combatFxFlash{position:absolute;inset:-8%;opacity:0;pointer-events:none}
+    .combatFxFlash.attack{background:radial-gradient(circle at 50% 50%,rgba(255,244,198,.24),rgba(255,132,89,.08) 38%,transparent 68%);animation:combatFxFlash .34s ease-out}
+    .combatFxFlash.guard{background:radial-gradient(circle at 50% 50%,rgba(109,219,124,.18),transparent 62%);animation:combatFxGuard .48s ease-out}
+    .combatFxFlash.damage{background:radial-gradient(circle at 50% 50%,rgba(255,255,255,.22),rgba(222,74,58,.13) 40%,transparent 72%);animation:combatFxFlash .42s ease-out}
+    .combatFxFlash.reflect{background:radial-gradient(circle at 50% 50%,rgba(229,153,247,.3),rgba(137,73,178,.12) 42%,transparent 72%);animation:combatFxReflect .56s ease-out}
+    .combatFxSlash{position:absolute;left:12%;top:49%;width:76%;height:5px;border-radius:999px;background:linear-gradient(90deg,transparent,#fff1a8 23%,#ffd43b 50%,#fff1a8 77%,transparent);box-shadow:0 0 18px #ffd43b,0 0 34px rgba(245,159,0,.65);transform:rotate(-11deg) scaleX(.05);transform-origin:center;animation:combatFxSlash .55s cubic-bezier(.18,.8,.2,1) forwards}
+    .combatFxBoardHit{animation:combatFxBoardHit .28s ease-out}
+    .combatFxBoardHeavy{animation:combatFxBoardHeavy .38s ease-out}
+    .combatFxShard{position:absolute;z-index:7;width:7px;height:7px;border-radius:2px;background:#d9c38c;box-shadow:0 0 8px rgba(255,220,139,.8);pointer-events:none;animation:combatFxShard .52s ease-out forwards}
+    .combatFxShard.p1{background:#ff8787;box-shadow:0 0 8px rgba(255,135,135,.8)}
+    .combatFxShard.p2{background:#74c0fc;box-shadow:0 0 8px rgba(116,192,252,.8)}
+    .cell.final-five-p1.combatVictoryCell,.cell.final-five-p2.combatVictoryCell{animation:combatVictoryCell .72s ease-out both;animation-delay:var(--victory-delay,0ms)}
+    .resultBox.combatResultEnter{animation:combatResultEnter .46s cubic-bezier(.18,.82,.2,1)}
+    .resultOverlay.combatResultGlow::before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(circle at 72% 50%,rgba(255,212,59,.16),transparent 46%);animation:combatResultGlow 1.1s ease-out forwards}
+    @keyframes combatFxFlash{0%{opacity:0;transform:scale(.82)}22%{opacity:1}100%{opacity:0;transform:scale(1.12)}}
+    @keyframes combatFxGuard{0%{opacity:0;transform:scale(.76)}35%{opacity:1}100%{opacity:0;transform:scale(1.18)}}
+    @keyframes combatFxReflect{0%{opacity:0;transform:scale(.62)}32%{opacity:1}100%{opacity:0;transform:scale(1.28)}}
+    @keyframes combatFxSlash{0%{opacity:0;transform:rotate(-11deg) scaleX(.05)}18%{opacity:1}64%{opacity:1;transform:rotate(-11deg) scaleX(1)}100%{opacity:0;transform:rotate(-11deg) translateX(8%) scaleX(1.08)}}
+    @keyframes combatFxBoardHit{0%,100%{transform:translate(0,0)}30%{transform:translate(-2px,1px)}60%{transform:translate(2px,-1px)}}
+    @keyframes combatFxBoardHeavy{0%,100%{transform:translate(0,0)}18%{transform:translate(-4px,2px)}38%{transform:translate(4px,-2px)}58%{transform:translate(-3px,1px)}78%{transform:translate(2px,-1px)}}
+    @keyframes combatFxShard{0%{opacity:1;transform:translate(-50%,-50%) rotate(0) scale(1)}100%{opacity:0;transform:translate(calc(-50% + var(--sx)),calc(-50% + var(--sy))) rotate(var(--sr)) scale(.18)}}
+    @keyframes combatVictoryCell{0%{filter:brightness(1);transform:scale(1)}38%{filter:brightness(1.8);transform:scale(1.035);box-shadow:inset 0 0 0 4px #ffe066,inset 0 0 30px rgba(255,212,59,.48),0 0 18px rgba(255,212,59,.4)}100%{filter:brightness(1);transform:scale(1)}}
+    @keyframes combatResultEnter{0%{opacity:0;transform:translateX(34px) scale(.97)}100%{opacity:1;transform:translateX(0) scale(1)}}
+    @keyframes combatResultGlow{0%{opacity:0}28%{opacity:1}100%{opacity:0}}
+    @media(prefers-reduced-motion:reduce){
+      .combatFxFlash,.combatFxSlash,.combatFxBoardHit,.combatFxBoardHeavy,.combatFxShard,.combatVictoryCell,.resultBox.combatResultEnter,.resultOverlay.combatResultGlow::before{animation-duration:.08s!important;animation-delay:0ms!important}
+    }
+  `;
+  document.head.appendChild(style);
+
+  function soundOn() {
+    return localStorage.getItem(SOUND_KEY) !== "off";
+  }
+
+  function unlock() {
+    if (!soundOn()) return;
+    try {
+      if (!audio) {
+        const Ctx = globalThis.AudioContext || globalThis.webkitAudioContext;
+        if (!Ctx) return;
+        audio = new Ctx();
+      }
+      if (audio.state === "suspended") audio.resume().catch(() => {});
+    } catch {}
+  }
+
+  function beep(start, end, duration, gain, type = "sine", delay = 0) {
+    if (!soundOn()) return;
+    unlock();
+    if (!audio || audio.state === "suspended") return;
+    const now = audio.currentTime + delay;
+    const osc = audio.createOscillator();
+    const amp = audio.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(start, now);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(20, end), now + duration);
+    amp.gain.setValueAtTime(.0001, now);
+    amp.gain.exponentialRampToValueAtTime(gain, now + .01);
+    amp.gain.exponentialRampToValueAtTime(.0001, now + duration);
+    osc.connect(amp).connect(audio.destination);
+    osc.start(now);
+    osc.stop(now + duration + .02);
+  }
+
+  function noise(duration = .12, gain = .035) {
+    if (!soundOn()) return;
+    unlock();
+    if (!audio || audio.state === "suspended") return;
+    const frames = Math.max(1, Math.floor(audio.sampleRate * duration));
+    const buffer = audio.createBuffer(1, frames, audio.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < frames; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / frames);
+    const src = audio.createBufferSource();
+    const amp = audio.createGain();
+    const filter = audio.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 1450;
+    amp.gain.value = gain;
+    src.buffer = buffer;
+    src.connect(filter).connect(amp).connect(audio.destination);
+    src.start();
+  }
+
+  function ensureFxLayer() {
+    const root = stage();
+    if (!root) return null;
+    let layer = root.querySelector(".combatFxOverlay");
+    if (!layer) {
+      layer = document.createElement("div");
+      layer.className = "combatFxOverlay";
+      layer.setAttribute("aria-hidden", "true");
+      root.appendChild(layer);
+    }
+    return layer;
+  }
+
+  function flash(kind) {
+    const layer = ensureFxLayer();
+    if (!layer) return;
+    const node = document.createElement("div");
+    node.className = `combatFxFlash ${kind}`;
+    layer.appendChild(node);
+    setTimeout(() => node.remove(), reduced ? 120 : 700);
+  }
+
+  function slash() {
+    const layer = ensureFxLayer();
+    if (!layer) return;
+    const node = document.createElement("div");
+    node.className = "combatFxSlash";
+    layer.appendChild(node);
+    setTimeout(() => node.remove(), reduced ? 120 : 720);
+  }
+
+  function shake(heavy = false) {
+    const node = board();
+    if (!node || reduced) return;
+    const cls = heavy ? "combatFxBoardHeavy" : "combatFxBoardHit";
+    node.classList.remove(cls);
+    void node.offsetWidth;
+    node.classList.add(cls);
+    setTimeout(() => node.classList.remove(cls), heavy ? 450 : 330);
+  }
+
+  function playStepSound(kind) {
+    if (kind === "attack") {
+      beep(170, 105, .11, .03, "square");
+    } else if (kind === "guard") {
+      beep(260, 190, .12, .025, "triangle");
+    } else if (kind === "damage") {
+      beep(95, 54, .18, .045, "triangle");
+      noise(.12, .03);
+    } else if (kind === "cleave") {
+      beep(760, 180, .2, .04, "sawtooth");
+    } else if (kind === "reflect") {
+      beep(185, 520, .22, .035, "sine");
+      beep(350, 680, .16, .02, "triangle", .04);
+    } else if (kind === "death") {
+      beep(130, 52, .16, .024, "triangle");
+    }
+  }
+
+  function stepKind(text) {
+    if (/主攻擊/.test(text)) return "attack";
+    if (/傷害與陣亡/.test(text)) return "damage";
+    if (/斬入/.test(text)) return "cleave";
+    if (/反震/.test(text)) return "reflect";
+    return "";
+  }
+
+  function syncStep() {
+    const text = label()?.textContent || "";
+    const root = stage();
+    if (!root || root.classList.contains("hidden")) {
+      lastStep = "";
+      return;
+    }
+    if (!text || text === lastStep) return;
+    lastStep = text;
+    const kind = stepKind(text);
+    if (!kind) return;
+
+    if (kind === "attack") {
+      flash("attack");
+      playStepSound("attack");
+      requestAnimationFrame(() => {
+        if (document.querySelector(".combatGuardLine")) {
+          flash("guard");
+          playStepSound("guard");
+        }
+      });
+    } else if (kind === "damage") {
+      flash("damage");
+      shake(false);
+      playStepSound("damage");
+    } else if (kind === "cleave") {
+      slash();
+      shake(false);
+      playStepSound("cleave");
+    } else if (kind === "reflect") {
+      flash("reflect");
+      shake(true);
+      playStepSound("reflect");
+    }
+  }
+
+  function burstDeath(piece) {
+    if (!piece || piece.dataset.combatFxDeath === "1") return;
+    piece.dataset.combatFxDeath = "1";
+    const container = pieces();
+    if (!container) return;
+    const left = parseFloat(piece.style.left || "50");
+    const top = parseFloat(piece.style.top || "50");
+    const pidClass = piece.classList.contains("p2") ? "p2" : "p1";
+    for (let i = 0; i < 7; i++) {
+      const shard = document.createElement("span");
+      shard.className = `combatFxShard ${pidClass}`;
+      shard.style.left = `${left}%`;
+      shard.style.top = `${top}%`;
+      const angle = Math.PI * 2 * i / 7 + .2;
+      const distance = 18 + (i % 3) * 8;
+      shard.style.setProperty("--sx", `${Math.cos(angle) * distance}px`);
+      shard.style.setProperty("--sy", `${Math.sin(angle) * distance}px`);
+      shard.style.setProperty("--sr", `${(i % 2 ? -1 : 1) * (80 + i * 19)}deg`);
+      container.appendChild(shard);
+      setTimeout(() => shard.remove(), reduced ? 120 : 620);
+    }
+    playStepSound("death");
+  }
+
+  function syncDeaths() {
+    const container = pieces();
+    if (!container) return;
+    for (const piece of container.querySelectorAll(".combatDeathPiece.combatDeathFading")) burstDeath(piece);
+  }
+
+  function syncVictory() {
+    const overlay = resultOverlay();
+    const open = Boolean(overlay && !overlay.classList.contains("hidden"));
+    if (!open) {
+      victoryPlayed = false;
+      for (const cell of document.querySelectorAll(".combatVictoryCell")) {
+        cell.classList.remove("combatVictoryCell");
+        cell.style.removeProperty("--victory-delay");
+      }
+      return;
+    }
+    if (victoryPlayed) return;
+    victoryPlayed = true;
+    const cells = [...document.querySelectorAll(".cell.final-five-p1,.cell.final-five-p2")];
+    cells.sort((a, b) => [...a.parentElement.children].indexOf(a) - [...b.parentElement.children].indexOf(b));
+    cells.forEach((cell, index) => {
+      cell.style.setProperty("--victory-delay", `${index * 90}ms`);
+      cell.classList.add("combatVictoryCell");
+    });
+    const box = overlay?.querySelector(".resultBox");
+    box?.classList.remove("combatResultEnter");
+    if (box) {
+      void box.offsetWidth;
+      box.classList.add("combatResultEnter");
+    }
+    overlay?.classList.add("combatResultGlow");
+    setTimeout(() => overlay?.classList.remove("combatResultGlow"), 1250);
+    if (cells.length) {
+      beep(330, 440, .18, .026, "triangle");
+      beep(440, 555, .18, .024, "triangle", .12);
+      beep(555, 740, .26, .022, "sine", .24);
+    }
+  }
+
+  document.addEventListener("pointerdown", unlock, { passive: true });
+  document.addEventListener("keydown", unlock);
+
+  const stepLabel = label();
+  if (stepLabel) {
+    new MutationObserver(() => queueMicrotask(syncStep))
+      .observe(stepLabel, { childList: true, subtree: true, characterData: true });
+  }
+  const combatPieces = pieces();
+  if (combatPieces) {
+    new MutationObserver(() => queueMicrotask(syncDeaths))
+      .observe(combatPieces, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+  }
+  const combatStage = stage();
+  if (combatStage) {
+    new MutationObserver(() => {
+      queueMicrotask(syncStep);
+      queueMicrotask(syncDeaths);
+    }).observe(combatStage, { attributes: true, attributeFilter: ["class"] });
+  }
+  const results = resultOverlay();
+  if (results) {
+    new MutationObserver(() => queueMicrotask(syncVictory))
+      .observe(results, { attributes: true, attributeFilter: ["class"] });
+  }
+
+  syncStep();
+  syncDeaths();
+  syncVictory();
+})();
