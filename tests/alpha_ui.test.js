@@ -16,11 +16,13 @@ const localClient = read("local_client.js");
 const sharedUi = read("alpha_ui.js");
 const shellCss = read("game_shell.css");
 const layoutCss = read("local_layout.css");
+const onlineLayoutCss = read("online_layout.css");
 const server = read("server.js");
 const stripComments = text => text.replace(/^\s*\/\/.*$/gm, "");
 
 const fixed = () => new GameEngine({ randomInt: () => 0, turnOrderMode: "fixed", startingPlayer: 1 });
 const intent = (engine, fields) => ({ ...fields, turnId: engine.turnId });
+const endTurn = (engine, pid = engine.current) => engine.endTurn(pid, intent(engine, {}));
 function bench() {
   const engine = fixed();
   engine.board = Array.from({ length: 9 }, () => Array(9).fill(null));
@@ -37,11 +39,12 @@ function bench() {
 
 /* ---------------- 入口 ---------------- */
 
-test("主要入口同時提供單機與連線兩個選項", () => {
-  assert.match(html, /id="entryOverlay"/);
-  assert.match(html, /id="entryOnlineBtn"[^>]*>[\s\S]*?連線對戰/);
-  assert.match(html, /id="entryLocalBtn"[^>]*href="\/local"[\s\S]*?單機測試/);
+test("連線入口直接進入大廳，並保留單機與規則入口", () => {
+  assert.match(html, /id="lobbyScreen"/);
+  assert.match(html, /id="roomDirectory"[\s\S]*?等待中的房間/);
+  assert.match(html, /class="btn modeLink" href="\/local">🎮 單機測試/);
   assert.match(html, /id="entryHelpBtn"[\s\S]*?規則/);
+  assert.doesNotMatch(html, /id="entryOverlay"/);
   assert.match(server, /\["\/", \["alpha\.html"/);
   assert.match(server, /\["\/local", \["index\.html"/);
 });
@@ -50,26 +53,27 @@ test("兩種模式都不再標示為舊版原型", () => {
   assert.match(localHtml, /class="btn modeLink" href="\/">🌐 連線對戰/);
   assert.doesNotMatch(localHtml, /舊版原型|舊版規則/);
   assert.doesNotMatch(html, /舊版原型|舊版規則/);
-  assert.match(html, /同一套規則引擎/);
+  assert.match(html, /<script src="\/game_engine\.js"><\/script>/);
 });
 
-test("連線對戰有建立房間、複製房號、加入房間、返回模式選擇", () => {
+test("連線大廳有房間列表、建立、房號加入、複製與離開", () => {
+  assert.match(html, /id="roomList"/);
   assert.match(html, /id="createBtn"[\s\S]*?建立房間/);
   assert.match(html, /id="roomInput"/);
   assert.match(html, /id="joinBtn"[\s\S]*?加入房間/);
   assert.match(html, /id="copyRoomBtn"[\s\S]*?複製房號/);
-  assert.match(html, /id="backToEntryBtn"[\s\S]*?模式選擇/);
+  assert.match(html, /id="leaveWaitingBtn"[\s\S]*?離開房間/);
   assert.match(client, /\$\("#copyRoomBtn"\)\.onclick/);
-  assert.match(client, /\$\("#backToEntryBtn"\)\.onclick = showEntry/);
+  assert.match(client, /\$\("#leaveWaitingBtn"\)\.onclick = leaveRoom/);
 });
 
-test("連線狀態、隱私資訊與終局摘要的 DOM 必須完整且可顯示", () => {
-  assert.match(html, /id="privacyInfo" class="[^"]*hidden[^"]*"/);
-  assert.match(html, /id="matchSummarySection" class="[^"]*hidden[^"]*"[\s\S]*?id="matchSummary"/);
-  assert.doesNotMatch(html, /id="(?:privacyInfo|matchSummary)"[^>]*style="[^"]*display\s*:\s*none/);
-  assert.match(client, /privacyInfo\.classList\.remove\("hidden"\)/);
-  assert.match(client, /summarySection\.classList\.remove\("hidden"\)/);
-  assert.match(client, /summarySection\.classList\.add\("hidden"\)/);
+test("大廳、對局與結算畫面分離，所有 client selector 都有對應 DOM", () => {
+  assert.match(html, /id="lobbyScreen"/);
+  assert.match(html, /id="gameScreen" class="[^"]*hidden[^"]*"/);
+  assert.match(html, /id="resultOverlay" class="[^"]*hidden[^"]*"/);
+  assert.match(client, /lobbyScreen"\)\.classList\.toggle\("hidden", inGame\)/);
+  assert.match(client, /gameScreen"\)\.classList\.toggle\("hidden", !inGame\)/);
+  assert.equal((html.match(/id="board"/g) || []).length, 1, "棋盤只存在於對局畫面");
 
   const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
   const references = [...client.matchAll(/\$\("#([A-Za-z0-9_-]+)"\)/g)].map(match => match[1]);
@@ -137,7 +141,9 @@ test("單機可實際部署並完成一輪戰鬥（雙方行動後才結算）",
   engine.players[1].hand = Array(5).fill("shield");
   assert.equal(engine.deploy(1, intent(engine, { r: 4, c: 4, type: "sword", rank: 1 })).ok, true);
   assert.equal(engine.combatResolutionCount, 0, "第一位部署後不得結算");
+  assert.equal(endTurn(engine, 1).ok, true);
   assert.equal(engine.deploy(2, intent(engine, { r: 4, c: 5, type: "shield", rank: 1 })).ok, true);
+  assert.equal(endTurn(engine, 2).ok, true);
   assert.equal(engine.combatResolutionCount, 1, "雙方行動後結算一次");
   assert.equal(engine.board[4][4].hp, 95);
   assert.equal(engine.board[4][5].hp, 124);      // 盾無減傷：160 - 36
@@ -191,7 +197,9 @@ test("單機也受同兵種★★唯一限制，且被擋時仍可出★", () =>
   engine.players[0].hand = Array(5).fill("sword");
   engine.players[1].hand = Array(5).fill("shield");
   assert.equal(engine.deploy(1, intent(engine, { r: 0, c: 0, type: "sword", rank: 2 })).ok, true);
+  assert.equal(endTurn(engine, 1).ok, true);
   assert.equal(engine.deploy(2, intent(engine, { r: 8, c: 8, type: "shield", rank: 1 })).ok, true);
+  assert.equal(endTurn(engine, 2).ok, true);
   engine.players[0].hand = Array(5).fill("sword");
   assert.equal(engine.deploy(1, intent(engine, { r: 0, c: 2, type: "sword", rank: 2 })).ok, false);
   assert.equal(engine.deploy(1, intent(engine, { r: 0, c: 2, type: "sword", rank: 1 })).ok, true);
@@ -353,6 +361,8 @@ test("有 hover 的裝置上，選取手牌不會把大卡釘住擋住棋盤", (
     assert.doesNotMatch(text, /hoverType \|\| selectedType/,
       `${name} 選取後不得無條件顯示大卡`);
   }
+  assert.match(client, /canAct:\s*state\?\.canAct/,
+    "連線端結束回合判斷必須讀伺服器狀態，不自行複製引擎規則");
   // 大卡是疊在棋盤上的 absolute 浮層，無論如何都不能吃掉點擊
   const block = css.match(/^\.cardDetail\s*\{[\s\S]*?\}/m);
   assert.ok(block, "找不到 .cardDetail 樣式");
@@ -439,18 +449,22 @@ test("兵種大卡不得被任何祖先裁切", () => {
   assert.doesNotMatch(shellCss, /\.handPanel\{[^}]*overflow:\s*hidden/);
 });
 
-test("單機與連線使用同一組版面樣式與結構", () => {
+test("單機與連線共用棋盤外殼，連線端另有大廳與玩家帶版面", () => {
   for (const [label, page] of [["alpha.html", html], ["index.html", localHtml]]) {
     assert.ok(page.includes('href="/game_shell.css?v='), `${label} 必須載入共用外殼樣式`);
     assert.ok(page.includes('href="/local_layout.css?v='), `${label} 必須載入共用版面`);
-    // 相同的結構槽位
-    for (const marker of ['class="top"', 'class="layout"', 'class="gameCol"', 'class="boardWrap"',
-      'class="handPanel"', 'class="handHeader"', 'id="hand"', 'id="rankRow"',
-      'id="cardDetail"', 'class="side"', 'turnSection', 'previewSection', 'logSection']) {
+    for (const marker of ['class="boardWrap"', 'class="handPanel"', 'class="handHeader"',
+      'id="hand"', 'id="rankRow"', 'id="cardDetail"', 'turnSection', 'logSection']) {
       assert.ok(page.includes(marker), `${label} 缺少共用結構 ${marker}`);
     }
   }
-  for (const route of ["/game_shell.css", "/local_layout.css"]) {
+  assert.ok(html.includes('href="/online_layout.css?v='), "連線端必須載入專用版面");
+  for (const marker of ['id="lobbyScreen"', 'id="roomList"', 'id="opponentBand"', 'id="selfBand"']) {
+    assert.ok(html.includes(marker), `連線端缺少階段三結構 ${marker}`);
+  }
+  assert.match(onlineLayoutCss, /\.onlineGameCol\s*\{[\s\S]*?grid-template-rows:/);
+  assert.match(onlineLayoutCss, /@media \(max-width:\s*680px\)/);
+  for (const route of ["/game_shell.css", "/local_layout.css", "/online_layout.css"]) {
     assert.ok(server.includes(`["${route}"`), `server 缺少 ${route} 路由`);
   }
 });
@@ -738,8 +752,8 @@ test("警示條有固定佔位，不會因出現或消失擠壓其他元件", ()
   assert.ok(rows, "turnSection 必須用固定列高");
   // minmax(0, 1fr) 內部有空格，先把括號裡的空白收掉才數得對
   const tracks = rows[1].trim().replace(/\([^)]*\)/g, m => m.replace(/\s+/g, "")).split(/\s+/);
-  assert.equal(tracks.length, 7,
-    `多一列給警示條，共 7 列，實際是「${rows[1].trim()}」`);
+  assert.equal(tracks.length, 8,
+    `警示條與結束回合都有固定列，共 8 列，實際是「${rows[1].trim()}」`);
   assert.equal(tracks[2], "22px", "警示條那一列要有固定高度");
   // 空的時候完全透明，不畫空盒子
   assert.match(layoutCss, /\.phaseBadge\s*\{[^}]*background:\s*transparent[^}]*\}/s);
@@ -775,4 +789,256 @@ test("移動是替代行動：有牌時不得移動，沒牌沒棋時自動跳�
   assert.equal(engine.legalMoves(1).length, 0, "場上還沒有棋子時無處可移");
   assert.equal(engine.canAct(1), false, "此時無法行動，應由引擎自動跳過");
   assert.equal(engine.gameOver, false, "但不判輸");
+});
+
+/* ---------------- UX 規格階段一 ---------------- */
+
+test("階段一：輪到誰有大字、玩家色、資訊帶與棋盤發亮，非自己回合手牌降亮", () => {
+  for (const [name, page] of [["index.html", localHtml], ["alpha.html", html]]) {
+    assert.match(page, /id="turnText" class="turn" aria-live="polite"/, `${name} 的回合大字需可被即時朗讀`);
+  }
+  for (const [name, text] of [["local_client.js", localClient], ["alpha_client.js", client]]) {
+    assert.match(text, /function renderTurnVisual\(\)/, `${name} 必須集中更新回合視覺`);
+    assert.match(text, /active-p\$\{pid\}/, `${name} 必須同步 P1／P2 玩家色`);
+    assert.match(text, /inactive-turn/, `${name} 必須能降低非行動方手牌亮度`);
+  }
+  assert.match(layoutCss, /\.turnSection\.active-p1\s*\{/);
+  assert.match(layoutCss, /\.turnSection\.active-p2\s*\{/);
+  assert.match(layoutCss, /\.board\.active-p1\s*\{/);
+  assert.match(layoutCss, /\.board\.active-p2\s*\{/);
+  assert.match(layoutCss, /\.handPanel\.inactive-turn \.hand/);
+});
+
+test("階段一：終局使用全螢幕覆蓋層並提供再戰、離開與收合戰報", () => {
+  for (const [name, page] of [["index.html", localHtml], ["alpha.html", html]]) {
+    assert.match(page, /id="resultOverlay" class="overlay resultOverlay hidden"/, `${name} 缺少預設隱藏的終局層`);
+    for (const id of ["resultTitle", "resultReason", "resultRematchBtn", "resultLeaveBtn",
+      "resultReportBtn", "resultReport"]) {
+      assert.ok(page.includes(`id="${id}"`), `${name} 缺少 ${id}`);
+    }
+  }
+  assert.match(css, /\.resultOverlay\s*\{[^}]*z-index:\s*60/s);
+  assert.match(css, /\.resultReport\s*\{[^}]*overflow:\s*auto/s);
+  for (const [name, text] of [["local_client.js", localClient], ["alpha_client.js", client]]) {
+    assert.match(text, /function renderResultOverlay\(\)/, `${name} 必須渲染終局層`);
+    assert.match(text, /#resultTitle"\)\.textContent/, `${name} 的結果不得以 innerHTML 寫入`);
+    assert.match(text, /#resultReason"\)\.textContent/, `${name} 的原因不得以 innerHTML 寫入`);
+    assert.match(text, /#resultReportBtn"\)\.onclick/, `${name} 必須能開關戰報`);
+  }
+});
+
+test("階段一：終局原因與致勝五顆直接使用引擎資料", () => {
+  const rules = GameEngine.overtimeRules();
+  assert.equal(AlphaUI.resultReasonLabel({ gameOver: true, winner: 1, endReason: "five_line", overtime: false }),
+    "P1 在戰鬥結算後維持五連；棋盤金框標示致勝五顆。");
+  assert.equal(AlphaUI.resultReasonLabel({ gameOver: true, winner: 2, endReason: "five_line", overtime: true }),
+    "P2 在加賽戰鬥結算後維持五連；棋盤金框標示致勝五顆。");
+  assert.match(AlphaUI.resultReasonLabel({ gameOver: true, winner: "double_loss",
+    endReason: "passivity_forfeit", overtimeRules: rules }), new RegExp(`${rules.passivityForfeitRounds} 輪`));
+
+  const final = { finalFive: { p1: [[{ r: 2, c: 1 }, { r: 2, c: 2 }]], p2: [[{ r: 5, c: 5 }]] } };
+  assert.equal(AlphaUI.finalFiveOwner(final, 2, 2), 1);
+  assert.equal(AlphaUI.finalFiveOwner(final, 5, 5), 2);
+  assert.equal(AlphaUI.finalFiveOwner(final, 0, 0), 0);
+  for (const text of [client, localClient]) assert.match(text, /UI\.finalFiveOwner\(/);
+  assert.match(css, /\.cell\.final-five-p1/);
+  assert.match(css, /\.cell\.final-five-p2/);
+});
+
+test("階段一：灰色操作直接顯示原因，炮擊原因兩端共用", () => {
+  assert.equal(AlphaUI.artilleryDisabledReason({ turnReason: "不是你的回合", remaining: 2 }), "不是你的回合");
+  assert.equal(AlphaUI.artilleryDisabledReason({ remaining: 0 }), "本場炮擊已用完");
+  assert.equal(AlphaUI.artilleryDisabledReason({ remaining: 1, usedThisTurn: true }), "本回合已使用炮擊");
+  assert.equal(AlphaUI.artilleryDisabledReason({ remaining: 1, deploymentCommitted: true }), "",
+    "部署後仍可炮擊");
+  assert.equal(AlphaUI.endTurnDisabledReason({ deploymentCommitted: false }), "請先部署或移動");
+  assert.equal(AlphaUI.endTurnDisabledReason({ deploymentCommitted: true }), "");
+  assert.equal(AlphaUI.endTurnDisabledReason({ deploymentCommitted: false, canAct: false }), "",
+    "炮擊後若已無法部署或移動，仍要讓玩家立即結束回合");
+  assert.equal(AlphaUI.rankDisabledReason({ count: 2, cost: 3 }), "需要 3 張，目前只有 2 張");
+  for (const [name, text] of [["local_client.js", localClient], ["alpha_client.js", client]]) {
+    assert.match(text, /UI\.artilleryDisabledReason\(/, `${name} 必須使用共用炮擊原因`);
+    assert.match(text, /artilleryBtn\.textContent = disabledReason|artilleryButton\.textContent = disabledReason/,
+      `${name} 必須把原因直接寫在炮擊按鈕上`);
+    assert.match(text, /手牌與炮擊會在可操作時恢復/, `${name} 必須在固定狀態列說明整體停用原因`);
+  }
+  assert.match(client, /等待伺服器回應/);
+});
+
+test("階段一：連線操作等待 10 秒會自動解除，收到結果則取消計時", () => {
+  assert.match(client, /const REQUEST_TIMEOUT_MS = 10_000/);
+  assert.match(client, /pendingRequestTimer = setTimeout\([\s\S]*?REQUEST_TIMEOUT_MS\);/);
+  assert.match(client, /伺服器超過 \$\{REQUEST_TIMEOUT_MS \/ 1000\} 秒沒有回傳新狀態，已解除等待，請重試/);
+  assert.match(client, /send\(\{ type: "action"[\s\S]*?schedulePendingRequestTimeout\(\)/,
+    "送出操作後必須開始倒數");
+  assert.match(client, /message\.type === "state"[\s\S]*?clearPendingRequest\(\)/,
+    "收到新狀態必須解除等待並取消計時");
+  assert.match(client, /message\.type === "rejected" \|\| message\.type === "error"[\s\S]*?clearPendingRequest\(\)/,
+    "收到拒絕或錯誤也必須取消計時");
+  assert.match(client, /socket\.addEventListener\("close"[\s\S]*?cancelPendingRequestTimeout\(\)/,
+    "斷線期間不得讓舊計時器誤解鎖");
+});
+
+/* ---------------- UX 規格階段二 ---------------- */
+
+test("階段二：引擎提供可播放的權威戰鬥事件，不讓前端重算規則", () => {
+  const reflectEngine = bench();
+  const shield = reflectEngine.put(4, 4, 1, "shield", 2);
+  const spear = reflectEngine.put(4, 5, 2, "spear", 1, 20);
+  const reflectResult = reflectEngine.resolveCombat();
+  reflectEngine.ensureRoundRecord().combat = reflectResult;
+  const reflectCue = reflectEngine.lastCombatPresentation();
+
+  assert.match(reflectCue.id, new RegExp(`:${reflectCue.round}$`));
+  assert.deepEqual(reflectCue.reflections[0].from, { r: 4, c: 4 }, "反震必須帶盾的來源格");
+  assert.equal(reflectCue.reflections[0].shieldId, shield.id);
+  assert.equal(reflectCue.reflections[0].unitId, spear.id);
+  assert.ok(reflectCue.deaths.some(item => item.unit.id === spear.id && item.phase === "reflection"),
+    "反震陣亡必須標示演出階段");
+  assert.deepEqual(reflectEngine.visibleStateFor(1).lastCombat, reflectCue,
+    "連線狀態直接傳送同一份引擎演出資料");
+  assert.deepEqual(Object.keys(reflectCue.deaths[0].unit).sort(), ["id", "pid", "rank", "type"],
+    "演出資料不得夾帶手牌、牌庫或其他隱藏資訊");
+
+  const cleaveEngine = bench();
+  const sword = cleaveEngine.put(4, 4, 1, "sword", 2);
+  const victim = cleaveEngine.put(4, 5, 2, "spear", 1, 10);
+  cleaveEngine.put(4, 6, 2, "spear", 1);
+  const cleaveResult = cleaveEngine.resolveCombat();
+  cleaveEngine.ensureRoundRecord().combat = cleaveResult;
+  const cleaveCue = cleaveEngine.lastCombatPresentation();
+  assert.equal(cleaveCue.cleaves[0].unitId, sword.id);
+  assert.equal(cleaveCue.cleaves[0].type, "sword");
+  assert.equal(cleaveCue.cleaves[0].rank, 2);
+  assert.ok(cleaveCue.deaths.some(item => item.unit.id === victim.id && item.phase === "main"));
+});
+
+test("階段二：兩個入口都有不占版面的棋盤演出層與可點擊跳過按鈕", () => {
+  for (const [name, page] of [["index.html", localHtml], ["alpha.html", html]]) {
+    for (const id of ["combatStage", "combatLayer", "combatPieces", "combatStepLabel", "skipCombatBtn"]) {
+      assert.ok(page.includes(`id="${id}"`), `${name} 缺少 ${id}`);
+    }
+    assert.match(page, /id="skipCombatBtn"[^>]*type="button"[^>]*>跳過演出<\/button>/);
+  }
+  assert.match(css, /\.combatStage\s*\{[^}]*position:\s*absolute[^}]*pointer-events:\s*none/s,
+    "演出層不得推擠版面或攔住棋盤");
+  assert.match(css, /\.skipCombatBtn\s*\{[^}]*pointer-events:\s*auto/s,
+    "跳過按鈕必須能直接點擊，不能只靠 hover");
+  assert.match(css, /@keyframes combatDeathFade/);
+  assert.match(css, /@keyframes combatCleaveMove/);
+  assert.match(css, /\.combatArrow\.reflection/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+});
+
+test("階段二：主攻擊、傷害、斬入、反震依序播放，兩端完成前鎖住操作與終局層", () => {
+  assert.match(sharedUi, /function createCombatPlayback\(/);
+  assert.match(sharedUi, /主攻擊｜護衛轉移[\s\S]*?傷害與陣亡[\s\S]*?★★劍斬入｜追擊[\s\S]*?★★盾反震/,
+    "共用播放器必須維持規格指定的四段順序");
+  assert.match(sharedUi, /skipButton\.onclick = skip/);
+  assert.match(sharedUi, /effect\(`-\$\{hit\.damage\}`/,
+    "傷害數字必須直接讀引擎結果");
+  assert.match(sharedUi, /cue\.guards/);
+  assert.match(sharedUi, /cue\.cleaves/);
+  assert.match(sharedUi, /cue\.reflections/);
+
+  for (const [name, text] of [["local_client.js", localClient], ["alpha_client.js", client]]) {
+    assert.match(text, /UI\.createCombatPlayback\(/, `${name} 必須使用共用播放器`);
+    assert.match(text, /div\.dataset\.unitId = String\(unit\.id\)/,
+      `${name} 必須讓斬入演出能鎖定權威單位`);
+    assert.match(text, /戰鬥演出中/, `${name} 演出期間必須鎖住操作`);
+    assert.match(text, /pendingCombat \|\| combatPlayback\.active\(\)/,
+      `${name} 終局層不得蓋住尚未播完的戰鬥`);
+  }
+  assert.match(client, /state\.lastCombat/);
+  assert.match(localClient, /engine\?\.lastCombatPresentation\(\)/);
+});
+
+/* ---------------- UX 規格階段三 ---------------- */
+
+test("階段三：未入座者收即時等待房列表，卡片可直接加入", () => {
+  for (const id of ["roomList", "roomCount", "emptyRooms", "nicknameInput", "roomNameInput",
+    "roomPasswordInput", "directPasswordInput", "passwordOverlay"]) {
+    assert.ok(html.includes(`id="${id}"`), `連線大廳缺少 ${id}`);
+  }
+  assert.match(server, /sendJson\(ws, \{ type: "lobby", rooms: publicLobbyRooms\(\), serverNow: Date\.now\(\) \}\)/);
+  assert.match(server, /if \(!ws\.alphaSession\) sendJson\(ws, message\)/,
+    "大廳廣播只能送給未入座連線");
+  assert.match(server, /if \(room\.game \|\| room\.abandoned[\s\S]*?return null/,
+    "已開始或失效房間不得留在大廳");
+  assert.match(client, /message\.type === "lobby"[\s\S]*?lobbyRooms =/);
+  assert.match(client, /card\.onclick = \(\) => room\.hasPassword[\s\S]*?joinRoom\(room\.code/);
+});
+
+test("階段三：房名與暱稱只作顯示標籤，絕不進 innerHTML", () => {
+  const lobbyRenderer = client.match(/function renderLobbyRooms\(\)[\s\S]*?\n  function renderWaitingRoom/)[0];
+  const waitingRenderer = client.match(/function renderWaitingRoom\(\)[\s\S]*?\n  function setPlayerAvatar/)[0];
+  const playerRenderer = client.match(/function renderPlayerBands\(\)[\s\S]*?\n  function render/)[0];
+  for (const [label, source] of [["房間列表", lobbyRenderer], ["等待房卡", waitingRenderer], ["玩家資訊帶", playerRenderer]]) {
+    assert.match(source, /textContent/, `${label} 必須用 textContent`);
+    assert.doesNotMatch(source, /innerHTML/, `${label} 不得用 innerHTML 插入使用者文字`);
+  }
+  assert.match(server, /function cleanLabel\(value, maxLength/);
+  assert.match(server, /nickname:\s*cleanNickname\(nickname\)/,
+    "暱稱不能取代伺服器 token 的座位身分");
+  assert.match(client, /const NICKNAME_KEY = "five-line-alpha-nickname"/);
+  assert.match(client, /localStorage\.setItem\(NICKNAME_KEY, value\)/);
+});
+
+test("階段三：受保護房間只公開鎖頭，密碼雜湊且有嘗試次數限制", () => {
+  assert.match(server, /hasPassword: Boolean\(room\.password\)/);
+  assert.match(server, /crypto\.scryptSync/);
+  assert.match(server, /const salt = crypto\.randomBytes\(16\)/);
+  assert.match(server, /crypto\.timingSafeEqual/);
+  assert.match(server, /PASSWORD_ATTEMPT_LIMIT/);
+  assert.match(server, /errorCode: "password_required"/);
+  assert.match(server, /errorCode: "password_invalid"/);
+  assert.match(server, /errorCode: "password_rate_limited"/);
+  const lobbyShape = server.match(/function lobbyRoom\(room\)[\s\S]*?\n}/)[0];
+  assert.doesNotMatch(lobbyShape, /token|password:\s*room\.password/,
+    "大廳房卡不得洩漏密碼或重連 token");
+});
+
+test("階段三：手機直向可用且所有重要資訊都不依賴 hover", () => {
+  assert.match(html, /name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/);
+  assert.match(onlineLayoutCss, /@media \(max-width:\s*680px\)[\s\S]*?\.selfBand\.turnSection/);
+  assert.match(onlineLayoutCss, /\.lobbyNotice[\s\S]*?min-height:\s*28px/,
+    "大廳訊息必須保留固定槽位");
+  assert.match(onlineLayoutCss, /\.roomList[\s\S]*?grid-auto-rows:\s*116px/,
+    "房卡更新不得讓清單結構跳動");
+  assert.match(client, /card\.onclick =/,
+    "房卡用點擊加入，不能只靠 hover");
+  assert.match(client, /artilleryButton\.textContent = disabledReason/,
+    "炮擊停用原因直接顯示在按鈕上");
+});
+
+/* ---------------- UX 規格階段四 ---------------- */
+
+test("階段四：明確結束回合、醒目提示與權威逾時在兩端共用", () => {
+  for (const [name, page] of [["index.html", localHtml], ["alpha.html", html]]) {
+    assert.ok(page.includes('id="endTurnBtn"'), `${name} 缺少結束回合按鈕`);
+    assert.ok(page.includes('id="turnTimer"'), `${name} 缺少固定回合倒數槽位`);
+  }
+  for (const [name, text] of [["local_client.js", localClient], ["alpha_client.js", client]]) {
+    assert.match(text, /endTurnDisabledReason\(/, `${name} 必須直接顯示不能結束的原因`);
+    assert.match(text, /deploymentCommitted[\s\S]*?仍可炮擊[\s\S]*?結束回合/,
+      `${name} 必須在主要行動後引導炮擊或結束回合`);
+    assert.match(text, /\.classList\.toggle\("turn-ready"/,
+      `${name} 完成主要行動後必須讓玩家資訊區發亮`);
+  }
+  assert.match(shellCss, /\.endTurnBtn\.ready:not\(:disabled\)[\s\S]*?animation:endTurnPulse/,
+    "可結束時按鈕必須主動脈動提示");
+  assert.match(shellCss, /@media \(prefers-reduced-motion:reduce\)/,
+    "必須尊重減少動態效果的系統設定");
+  assert.match(layoutCss, /grid-template-rows:\s*335px 112px minmax\(0, 1fr\)/,
+    "單機側欄必須為新增按鈕保留高度，不能讓它被固定 section 裁掉");
+  assert.match(sharedUi, /GameEngine[\s\S]*?timeoutRules\(\)/,
+    "規則視窗的秒數必須向引擎讀取");
+  assert.match(server, /GameEngine\.timeoutRules\(\)\.disconnectMs/,
+    "伺服器斷線判離秒數必須向引擎讀取");
+  assert.match(server, /room\.game\.checkTurnTimeout\(Date\.now\(\)\)/,
+    "伺服器收到操作前必須先仲裁回合是否已到期");
+
+  const strippedClients = stripComments(`${localClient}\n${client}\n${server}`);
+  assert.doesNotMatch(strippedClients, /\b20_?000\b|\b40_?000\b/,
+    "20／40 秒只能定義在 game_engine.js，其他端不得各抄一份");
 });

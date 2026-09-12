@@ -7,6 +7,15 @@ const { GameEngine, TYPES, baseStats, cardCost } = require("../game_engine");
 const game = () => new GameEngine({ matchId: "alpha", roomCode: "ALPHA1", randomInt: () => 0,
   turnOrderMode: "fixed", startingPlayer: 1 });
 const intent = (engine, fields) => ({ ...fields, turnId: engine.turnId });
+const endTurn = (engine, pid = engine.current) => engine.endTurn(pid, intent(engine, {}));
+function deployTurn(engine, pid, fields) {
+  const result = engine.deploy(pid, intent(engine, fields));
+  if (result.ok) {
+    const ended = endTurn(engine, pid);
+    assert.equal(ended.ok, true, ended.error);
+  }
+  return result;
+}
 
 // 直接擺盤用的裸引擎：清空棋盤，自己放單位，手動叫 resolveCombat
 function bench() {
@@ -33,8 +42,8 @@ test("01 同玩家同兵種不能同時存在兩隻★★", () => {
   const engine = game();
   engine.players[0].hand = Array(5).fill("sword");
   engine.players[1].hand = Array(5).fill("shield");
-  assert.equal(engine.deploy(1, intent(engine, { r: 0, c: 0, type: "sword", rank: 2 })).ok, true);
-  assert.equal(engine.deploy(2, intent(engine, { r: 8, c: 8, type: "shield", rank: 1 })).ok, true);
+  assert.equal(deployTurn(engine, 1, { r: 0, c: 0, type: "sword", rank: 2 }).ok, true);
+  assert.equal(deployTurn(engine, 2, { r: 8, c: 8, type: "shield", rank: 1 }).ok, true);
   engine.players[0].hand = Array(5).fill("sword");
   const second = engine.deploy(1, intent(engine, { r: 0, c: 2, type: "sword", rank: 2 }));
   assert.equal(second.ok, false);
@@ -45,8 +54,8 @@ test("02 ★★死亡後可以再次形成同兵種★★", () => {
   const engine = game();
   engine.players[0].hand = Array(5).fill("sword");
   engine.players[1].hand = Array(5).fill("shield");
-  assert.equal(engine.deploy(1, intent(engine, { r: 0, c: 0, type: "sword", rank: 2 })).ok, true);
-  assert.equal(engine.deploy(2, intent(engine, { r: 8, c: 8, type: "shield", rank: 1 })).ok, true);
+  assert.equal(deployTurn(engine, 1, { r: 0, c: 0, type: "sword", rank: 2 }).ok, true);
+  assert.equal(deployTurn(engine, 2, { r: 8, c: 8, type: "shield", rank: 1 }).ok, true);
   // 該★★陣亡：3 張原始卡一起進 cooldown
   engine.board[0][0].hp = 0;
   const deaths = [];
@@ -63,8 +72,8 @@ test("03 上限擋下★★時仍可正常部署★，不會卡死行動", () =>
   const engine = game();
   engine.players[0].hand = Array(5).fill("sword");
   engine.players[1].hand = Array(5).fill("shield");
-  engine.deploy(1, intent(engine, { r: 0, c: 0, type: "sword", rank: 2 }));
-  engine.deploy(2, intent(engine, { r: 8, c: 8, type: "shield", rank: 1 }));
+  deployTurn(engine, 1, { r: 0, c: 0, type: "sword", rank: 2 });
+  deployTurn(engine, 2, { r: 8, c: 8, type: "shield", rank: 1 });
   engine.players[0].hand = Array(5).fill("sword");
   assert.equal(engine.deploy(1, intent(engine, { r: 0, c: 2, type: "sword", rank: 2 })).ok, false);
   assert.equal(engine.deploy(1, intent(engine, { r: 0, c: 2, type: "sword", rank: 1 })).ok, true);
@@ -370,8 +379,10 @@ test("27 P1+P2 兩手完成並結算後才判五連", () => {
   engine.players[1].hand = Array(5).fill("shield");
   engine.deploy(1, intent(engine, { r: 4, c: 4, type: "sword", rank: 1 }));
   assert.equal(engine.gameOver, false);
+  assert.equal(endTurn(engine, 1).ok, true);
   const outcome = engine.deploy(2, intent(engine, { r: 8, c: 8, type: "shield", rank: 1 }));
   assert.equal(outcome.ok, true);
+  assert.equal(endTurn(engine, 2).ok, true);
   assert.equal(engine.combatResolutionCount, 1, "本輪恰好結算一次戰鬥");
   assert.equal(engine.gameOver, true);
   assert.equal(engine.winner, 1);
@@ -434,10 +445,13 @@ test("30 連續三回合都是 P1 → P2 → combat，先行者不交替", () =>
     // 會觸發消極判負（雙敗）而提前結束對局。
     assert.equal(engine.deploy(1, intent(engine, { r: 3, c: round - 1, type: "sword", rank: 1 })).ok, true);
     assert.equal(engine.combatResolutionCount, combatBefore, "P1 部署後不得結算");
+    assert.equal(engine.current, 1, "部署後仍由 P1 決定是否炮擊或結束回合");
+    assert.equal(endTurn(engine, 1).ok, true);
 
     assert.equal(engine.current, 2, `第 ${round} 輪 P1 之後應輪到 P2`);
     order.push(engine.current);
     assert.equal(engine.deploy(2, intent(engine, { r: 4, c: round - 1, type: "shield", rank: 1 })).ok, true);
+    assert.equal(endTurn(engine, 2).ok, true);
     assert.equal(engine.combatResolutionCount, combatBefore + 1, "雙方行動後才結算一次");
   }
   assert.deepEqual(order, [1, 2, 1, 2, 1, 2]);
@@ -454,7 +468,8 @@ test("31 沒有任何玩家能跨回合取得連續兩次部署", () => {
     for (const pid of [1, 2]) {
       actors.push(engine.current);
       const row = pid === 1 ? 3 : 4;   // 相鄰才會交戰，否則觸發消極判負提前結束
-      assert.equal(engine.deploy(pid, intent(engine, { r: row, c: round - 1, type: pid === 1 ? "sword" : "shield", rank: 1 })).ok, true);
+      assert.equal(deployTurn(engine, pid, { r: row, c: round - 1,
+        type: pid === 1 ? "sword" : "shield", rank: 1 }).ok, true);
     }
   }
   // 相鄰兩次部署永遠是不同玩家，代表沒有任何人拿到連續兩次窗口
@@ -483,8 +498,8 @@ test("32 /local 與正式連線建房使用同一組回合順序設定", () => {
 function quietRound(engine, round) {
   engine.players[0].hand = Array(5).fill("sword");
   engine.players[1].hand = Array(5).fill("shield");
-  engine.deploy(1, intent(engine, { r: 0, c: round - 1, type: "sword", rank: 1 }));
-  engine.deploy(2, intent(engine, { r: 8, c: round - 1, type: "shield", rank: 1 }));
+  deployTurn(engine, 1, { r: 0, c: round - 1, type: "sword", rank: 1 });
+  deployTurn(engine, 2, { r: 8, c: round - 1, type: "shield", rank: 1 });
 }
 
 test("33 雙方連續 3 輪零交戰＝消極棄賽，判雙敗", () => {
@@ -510,8 +525,8 @@ test("34 只要有交戰就重新計數，單方閃避不會被判消極", () =>
   // 第 3 輪雙方貼在一起 → 有交戰 → 計數歸零
   engine.players[0].hand = Array(5).fill("sword");
   engine.players[1].hand = Array(5).fill("shield");
-  engine.deploy(1, intent(engine, { r: 4, c: 4, type: "sword", rank: 1 }));
-  engine.deploy(2, intent(engine, { r: 4, c: 5, type: "shield", rank: 1 }));
+  deployTurn(engine, 1, { r: 4, c: 4, type: "sword", rank: 1 });
+  deployTurn(engine, 2, { r: 4, c: 5, type: "shield", rank: 1 });
   assert.equal(engine.quietRounds, 0, "有交戰就歸零");
   assert.equal(engine.gameOver, false);
 
@@ -551,8 +566,8 @@ function bothAboutToWin() {
 
 test("35 同輪雙方五連不再判平手，改為進入加賽", () => {
   const engine = bothAboutToWin();
-  engine.deploy(1, intent(engine, { r: 0, c: 4, type: "shield", rank: 1 }));
-  engine.deploy(2, intent(engine, { r: 8, c: 4, type: "shield", rank: 1 }));
+  deployTurn(engine, 1, { r: 0, c: 4, type: "shield", rank: 1 });
+  deployTurn(engine, 2, { r: 8, c: 4, type: "shield", rank: 1 });
   assert.equal(engine.fiveLines(1).length > 0, true, "P1 已五連");
   assert.equal(engine.fiveLines(2).length > 0, true, "P2 已五連");
   assert.equal(engine.gameOver, false, "同輪雙方五連不結束");
@@ -563,8 +578,8 @@ test("35 同輪雙方五連不再判平手，改為進入加賽", () => {
 
 test("36 加賽中恰好單方五連才判勝，且加賽仍可部署新棋", () => {
   const engine = bothAboutToWin();
-  engine.deploy(1, intent(engine, { r: 0, c: 4, type: "shield", rank: 1 }));
-  engine.deploy(2, intent(engine, { r: 8, c: 4, type: "shield", rank: 1 }));
+  deployTurn(engine, 1, { r: 0, c: 4, type: "shield", rank: 1 });
+  deployTurn(engine, 2, { r: 8, c: 4, type: "shield", rank: 1 });
   assert.equal(engine.overtime, true);
 
   // 打斷 P2 的線；P1 的線還在 → 下一輪結算時 P1 獨自五連
@@ -572,9 +587,9 @@ test("36 加賽中恰好單方五連才判勝，且加賽仍可部署新棋", ()
   engine.players[0].hand = Array(5).fill("shield");
   engine.players[1].hand = Array(5).fill("shield");
   const before = engine.board.flat().filter(Boolean).length;
-  assert.equal(engine.deploy(1, intent(engine, { r: 5, c: 0, type: "shield", rank: 1 })).ok, true,
+  assert.equal(deployTurn(engine, 1, { r: 5, c: 0, type: "shield", rank: 1 }).ok, true,
     "加賽階段仍然可以部署");
-  assert.equal(engine.deploy(2, intent(engine, { r: 6, c: 8, type: "shield", rank: 1 })).ok, true);
+  assert.equal(deployTurn(engine, 2, { r: 6, c: 8, type: "shield", rank: 1 }).ok, true);
   assert.equal(engine.board.flat().filter(Boolean).length, before + 2 - 0, "兩顆新棋都上場了");
   assert.equal(engine.gameOver, true);
   assert.equal(engine.winner, 1, "只有 P1 有五連");
@@ -588,8 +603,8 @@ test("37 加賽緩衝輪數內不扣血，緩衝過後每輪扣 maxHP 的 10%", 
   assert.equal(rules.passivityForfeitRounds, 3);
 
   const engine = bothAboutToWin();
-  engine.deploy(1, intent(engine, { r: 0, c: 4, type: "shield", rank: 1 }));
-  engine.deploy(2, intent(engine, { r: 8, c: 4, type: "shield", rank: 1 }));
+  deployTurn(engine, 1, { r: 0, c: 4, type: "shield", rank: 1 });
+  deployTurn(engine, 2, { r: 8, c: 4, type: "shield", rank: 1 });
   const otStart = engine.overtimeStartRound;
   const probe = engine.board[0][0];
   const full = probe.maxHp;
@@ -599,24 +614,24 @@ test("37 加賽緩衝輪數內不扣血，緩衝過後每輪扣 maxHP 的 10%", 
   for (let i = 1; i <= rules.graceRounds; i++) {
     engine.players[0].hand = Array(5).fill("shield");
     engine.players[1].hand = Array(5).fill("shield");
-    engine.deploy(1, intent(engine, { r: 2, c: i - 1, type: "shield", rank: 1 }));
-    engine.deploy(2, intent(engine, { r: 6, c: i - 1, type: "shield", rank: 1 }));
+    deployTurn(engine, 1, { r: 2, c: i - 1, type: "shield", rank: 1 });
+    deployTurn(engine, 2, { r: 6, c: i - 1, type: "shield", rank: 1 });
     assert.equal(engine.roundNo - otStart, i + 1, "進入加賽那輪結束後 roundNo 已前進一輪");
     assert.equal(probe.hp, full, `加賽第 ${i} 輪仍在緩衝內，不該扣血`);
   }
   // 第 4 輪起開始扣
   engine.players[0].hand = Array(5).fill("shield");
   engine.players[1].hand = Array(5).fill("shield");
-  engine.deploy(1, intent(engine, { r: 2, c: 5, type: "shield", rank: 1 }));
-  engine.deploy(2, intent(engine, { r: 6, c: 5, type: "shield", rank: 1 }));
+  deployTurn(engine, 1, { r: 2, c: 5, type: "shield", rank: 1 });
+  deployTurn(engine, 2, { r: 6, c: 5, type: "shield", rank: 1 });
   assert.equal(probe.hp, full - step, "緩衝過後每輪扣一次 maxHP 的 10%");
 
   // 必須驗到第二次扣血：滿血時 maxHP×10% 與 當前HP×10% 相等，
   // 只驗第一次的話，改用當前 HP 當基準也會通過。
   engine.players[0].hand = Array(5).fill("shield");
   engine.players[1].hand = Array(5).fill("shield");
-  engine.deploy(1, intent(engine, { r: 2, c: 6, type: "shield", rank: 1 }));
-  engine.deploy(2, intent(engine, { r: 6, c: 6, type: "shield", rank: 1 }));
+  deployTurn(engine, 1, { r: 2, c: 6, type: "shield", rank: 1 });
+  deployTurn(engine, 2, { r: 6, c: 6, type: "shield", rank: 1 });
   assert.equal(engine.gameOver, false, "雙方都還有五連，加賽繼續");
   assert.equal(probe.hp, full - step * 2,
     `第二次仍扣固定的 ${step}（maxHP 基準）；若改用當前 HP 會是 ${full - step - Math.round((full - step) * 0.10)}`);
@@ -624,8 +639,8 @@ test("37 加賽緩衝輪數內不扣血，緩衝過後每輪扣 maxHP 的 10%", 
 
 test("38 加賽衰減敵我一視同仁，且會把線打斷", () => {
   const engine = bothAboutToWin();
-  engine.deploy(1, intent(engine, { r: 0, c: 4, type: "shield", rank: 1 }));
-  engine.deploy(2, intent(engine, { r: 8, c: 4, type: "shield", rank: 1 }));
+  deployTurn(engine, 1, { r: 0, c: 4, type: "shield", rank: 1 });
+  deployTurn(engine, 2, { r: 8, c: 4, type: "shield", rank: 1 });
   // 把 P2 線上一顆設成殘血，讓它先被衰減打掉
   engine.board[8][1].hp = 1;
   const p1Probe = engine.board[0][1];
@@ -634,9 +649,9 @@ test("38 加賽衰減敵我一視同仁，且會把線打斷", () => {
   for (let i = 1; i <= GameEngine.overtimeRules().graceRounds + 1; i++) {
     engine.players[0].hand = Array(5).fill("shield");
     engine.players[1].hand = Array(5).fill("shield");
-    engine.deploy(1, intent(engine, { r: 2, c: i - 1, type: "shield", rank: 1 }));
+    deployTurn(engine, 1, { r: 2, c: i - 1, type: "shield", rank: 1 });
     if (engine.gameOver) break;
-    engine.deploy(2, intent(engine, { r: 6, c: i - 1, type: "shield", rank: 1 }));
+    deployTurn(engine, 2, { r: 6, c: i - 1, type: "shield", rank: 1 });
   }
   assert.equal(engine.board[8][1], null, "殘血的 P2 單位被加賽衰減打掉");
   assert.ok(p1Probe.hp < p1Before, "P1 的單位同樣被扣血，衰減不分敵我");
@@ -658,9 +673,9 @@ test("39 加賽期間雙方零交戰時，消極判負先於衰減生效", () =>
   const quiet = (round) => {
     engine.players[0].hand = Array(5).fill("shield");
     engine.players[1].hand = Array(5).fill("shield");
-    engine.deploy(1, intent(engine, { r: 0, c: round === 1 ? 4 : round + 3, type: "shield", rank: 1 }));
+    deployTurn(engine, 1, { r: 0, c: round === 1 ? 4 : round + 3, type: "shield", rank: 1 });
     if (engine.gameOver) return;
-    engine.deploy(2, intent(engine, { r: 8, c: round === 1 ? 4 : round + 3, type: "shield", rank: 1 }));
+    deployTurn(engine, 2, { r: 8, c: round === 1 ? 4 : round + 3, type: "shield", rank: 1 });
   };
   quiet(1);
   assert.equal(engine.overtime, true, "先進加賽");

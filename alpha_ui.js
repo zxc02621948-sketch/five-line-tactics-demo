@@ -77,8 +77,14 @@
     return engine && engine.overtimeRules ? engine.overtimeRules() : null;
   }
 
+  function liveTimeoutRules() {
+    const engine = globalThis.FiveLineEngine && globalThis.FiveLineEngine.GameEngine;
+    return engine && engine.timeoutRules ? engine.timeoutRules() : null;
+  }
+
   function rulesHtml(catalog) {
     const ot = liveOvertimeRules();
+    const timeouts = liveTimeoutRules();
     const row = type => {
       const info = catalog[type], one = info.ranks[1];
       return `<tr><td>${ICONS[type]} ${info.name}</td><td>${one.maxHp}／${one.atk}</td>`
@@ -122,7 +128,10 @@
 
       <h3>回合流程</h3>
       <ul>
-        <li>每回合雙方各部署 1 顆棋。</li>
+        <li>每回合雙方各部署 1 顆棋；手牌用盡時則依規則移動 1 格。</li>
+        <li>完成部署／移動後仍可使用炮擊，最後按<b>結束回合</b>交棒。</li>
+        ${timeouts ? `<li>每回合有 <b>${timeouts.turnMs / 1000} 秒</b>；逾時由伺服器自動結束。`
+          + `斷線時暫停回合倒數，<b>${timeouts.disconnectMs / 1000} 秒</b>未重連則判離。</li>` : ""}
         <li>兩人都行動完後，一次結算全場戰鬥。</li>
         <li>戰鬥順序：主攻擊與護衛轉移　→　主傷害與移除陣亡　→　★★劍斬入／追擊　→　★★盾反震。</li>
       </ul>
@@ -164,7 +173,7 @@
       <h3>炮擊</h3>
       <ul>
         <li>每人整場 <b>2 發</b>。</li>
-        <li>只能在自己<b>部署之前</b>使用，每回合最多 1 發；用完仍然必須完成部署。</li>
+        <li>每回合最多 1 發，可在部署／移動<b>之前或之後</b>使用；炮擊不取代本回合的主要行動。</li>
         <li>以指定格為中心的 3×3 範圍：<b>中心 30 點</b>、外圈 8 格<b>各 12 點</b>。</li>
         <li><b>會誤傷自己的單位</b>，範圍內不分敵我。</li>
       </ul>`;
@@ -351,6 +360,273 @@
     }
   }
 
+  // ---- 正式戰鬥演出 ----
+  // 只播放引擎送來的 lastCombat；這裡不重新計算傷害、護衛、斬入或反震。
+  function hasCombatPlayback(cue) {
+    return Boolean(cue && ((cue.packets || []).length || (cue.damage || []).length
+      || (cue.cleaves || []).length || (cue.reflections || []).length));
+  }
+
+  function createCombatPlayback({ boardEl, stageEl, svgEl, piecesEl, labelEl, skipButton, onFinish }) {
+    if (!boardEl || !stageEl || !svgEl || !piecesEl || !labelEl || !skipButton) {
+      return { play: () => false, skip() {}, reset() {}, active: () => false };
+    }
+
+    let timer = null;
+    let running = false;
+    let cue = null;
+    let hiddenUnits = [];
+    const deathPieces = new Map();
+    const cleavePieces = new Map();
+
+    function align() {
+      const size = boardEl.clientWidth;
+      if (!size) return;
+      const rect = boardEl.getBoundingClientRect();
+      const wrap = stageEl.parentElement.getBoundingClientRect();
+      stageEl.style.left = `${rect.left - wrap.left + boardEl.clientLeft}px`;
+      stageEl.style.top = `${rect.top - wrap.top + boardEl.clientTop}px`;
+      stageEl.style.width = `${size}px`;
+      stageEl.style.height = `${size}px`;
+      svgEl.setAttribute("viewBox", `0 0 ${size} ${size}`);
+    }
+
+    const center = point => {
+      const cell = boardEl.clientWidth / 9;
+      return [point.c * cell + cell / 2, point.r * cell + cell / 2];
+    };
+
+    function svgNode(tag, attrs) {
+      const node = document.createElementNS(SVG_NS, tag);
+      for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+      svgEl.appendChild(node);
+      return node;
+    }
+
+    function arrow(from, to, className) {
+      const [x1, y1] = center(from);
+      const [x2, y2] = center(to);
+      const dx = x2 - x1, dy = y2 - y1;
+      const len = Math.hypot(dx, dy) || 1;
+      const inset = boardEl.clientWidth / 9 * 0.3;
+      const sx = x1 + dx / len * inset, sy = y1 + dy / len * inset;
+      const ex = x2 - dx / len * inset, ey = y2 - dy / len * inset;
+      svgNode("line", { x1: sx, y1: sy, x2: ex, y2: ey, class: `combatArrow ${className}` });
+      svgNode("polygon", {
+        class: `combatArrowHead ${className}`,
+        points: "0,-4 10,0 0,4",
+        transform: `translate(${ex} ${ey}) rotate(${Math.atan2(dy, dx) * 180 / Math.PI})`,
+      });
+    }
+
+    function line(from, to, className) {
+      const [x1, y1] = center(from);
+      const [x2, y2] = center(to);
+      svgNode("line", { x1, y1, x2, y2, class: className });
+    }
+
+    function place(node, point) {
+      node.style.left = `${(point.c + 0.5) / 9 * 100}%`;
+      node.style.top = `${(point.r + 0.5) / 9 * 100}%`;
+    }
+
+    function makePiece(unit, point, extraClass = "") {
+      const piece = document.createElement("div");
+      piece.className = `combatPiece p${unit.pid} ${extraClass}`.trim();
+      piece.dataset.unitId = String(unit.id ?? unit.unitId ?? "");
+      const stars = document.createElement("span");
+      stars.className = "combatPieceStars";
+      stars.textContent = "★".repeat(unit.rank || 1);
+      const icon = document.createElement("span");
+      icon.className = "combatPieceIcon";
+      icon.textContent = ICONS[unit.type] || "●";
+      piece.append(stars, icon);
+      place(piece, point);
+      piecesEl.appendChild(piece);
+      return piece;
+    }
+
+    function effect(text, point, className) {
+      const node = document.createElement("div");
+      node.className = `combatEffect ${className}`;
+      node.textContent = text;
+      place(node, point);
+      piecesEl.appendChild(node);
+      return node;
+    }
+
+    function clearEffects() {
+      svgEl.innerHTML = "";
+      for (const node of piecesEl.querySelectorAll(".combatEffect")) node.remove();
+    }
+
+    function hideFinalCleaveUnits() {
+      const ids = new Set((cue.cleaves || []).map(item => String(item.unitId)));
+      hiddenUnits = [...boardEl.querySelectorAll("[data-unit-id]")]
+        .filter(node => ids.has(node.dataset.unitId));
+      for (const node of hiddenUnits) node.classList.add("combatUnitHidden");
+    }
+
+    function preparePieces() {
+      piecesEl.innerHTML = "";
+      deathPieces.clear();
+      cleavePieces.clear();
+      hideFinalCleaveUnits();
+      const cleaveIds = new Set((cue.cleaves || []).map(item => String(item.unitId)));
+      for (const death of cue.deaths || []) {
+        if (cleaveIds.has(String(death.unit.id))) continue;
+        const piece = makePiece(death.unit, death, "combatDeathPiece");
+        piece.dataset.deathPhase = death.phase || "main";
+        deathPieces.set(String(death.unit.id), piece);
+      }
+      for (const cleave of cue.cleaves || []) {
+        const piece = makePiece({
+          id: cleave.unitId, pid: cleave.pid, type: cleave.type, rank: cleave.rank,
+        }, cleave.from, "combatCleavePiece");
+        const laterDeath = (cue.deaths || []).find(item => String(item.unit.id) === String(cleave.unitId));
+        if (laterDeath) {
+          piece.classList.add("combatDeathPiece");
+          piece.dataset.deathPhase = laterDeath.phase || "reflection";
+          deathPieces.set(String(cleave.unitId), piece);
+        }
+        cleavePieces.set(String(cleave.unitId), piece);
+      }
+    }
+
+    function fadeDeaths(phase) {
+      for (const piece of deathPieces.values()) {
+        if (piece.dataset.deathPhase === phase) piece.classList.add("combatDeathFading");
+      }
+    }
+
+    function renderAttack() {
+      clearEffects();
+      for (const packet of cue.packets || []) arrow(packet.from, packet.to, `p${packet.from.pid}`);
+      for (const [targetKey, guards] of Object.entries(cue.guards || {})) {
+        const [r, c] = targetKey.split(",").map(Number);
+        for (const guard of guards) line({ r, c }, guard, "combatGuardLine");
+      }
+    }
+
+    function renderDamage() {
+      clearEffects();
+      for (const hit of cue.damage || []) {
+        effect(`-${hit.damage}`, hit, `combatDamage p${hit.pid}`);
+        effect("", hit, "combatImpact");
+      }
+      fadeDeaths("main");
+    }
+
+    function renderCleave() {
+      clearEffects();
+      const cell = boardEl.clientWidth / 9;
+      for (const item of cue.cleaves || []) {
+        line(item.from, item.to, "combatCleavePath");
+        const piece = cleavePieces.get(String(item.unitId));
+        if (piece) {
+          piece.style.setProperty("--combat-dx", `${(item.to.c - item.from.c) * cell}px`);
+          piece.style.setProperty("--combat-dy", `${(item.to.r - item.from.r) * cell}px`);
+          piece.classList.add("combatCleaveMoving");
+        }
+        if (item.followUp) {
+          arrow(item.to, item.followUp, `cleave p${item.pid}`);
+          effect(`-${item.followUp.damage}`, item.followUp, `combatDamage cleave p${item.pid}`);
+        }
+      }
+      fadeDeaths("cleave");
+    }
+
+    function finishCleave() {
+      for (const item of cue?.cleaves || []) {
+        const piece = cleavePieces.get(String(item.unitId));
+        if (!piece) continue;
+        if (deathPieces.get(String(item.unitId)) === piece) {
+          piece.classList.remove("combatCleaveMoving");
+          piece.style.removeProperty("--combat-dx");
+          piece.style.removeProperty("--combat-dy");
+          place(piece, item.to);
+        } else piece.remove();
+      }
+      cleavePieces.clear();
+      for (const node of hiddenUnits) node.classList.remove("combatUnitHidden");
+      hiddenUnits = [];
+    }
+
+    function renderReflection() {
+      finishCleave();
+      clearEffects();
+      for (const item of cue.reflections || []) {
+        if (item.from) arrow(item.from, item, "reflection");
+        effect(`-${item.damage}`, item, "combatDamage reflection");
+      }
+      fadeDeaths("reflection");
+    }
+
+    function cleanup(notify) {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      finishCleave();
+      svgEl.innerHTML = "";
+      piecesEl.innerHTML = "";
+      deathPieces.clear();
+      stageEl.classList.add("hidden");
+      labelEl.textContent = "";
+      running = false;
+      const finishedCue = cue;
+      cue = null;
+      if (notify && typeof onFinish === "function") onFinish(finishedCue);
+    }
+
+    function play(nextCue) {
+      if (!hasCombatPlayback(nextCue)) return false;
+      if (running) cleanup(false);
+      cue = nextCue;
+      running = true;
+      align();
+      preparePieces();
+      stageEl.classList.remove("hidden");
+
+      const steps = [
+        { label: "主攻擊｜護衛轉移", duration: 820, render: renderAttack },
+        { label: "傷害與陣亡", duration: 880, render: renderDamage },
+      ];
+      if ((cue.cleaves || []).length) {
+        steps.push({ label: "★★劍斬入｜追擊", duration: 920, render: renderCleave, after: finishCleave });
+      }
+      if ((cue.reflections || []).length) {
+        steps.push({ label: "★★盾反震", duration: 820, render: renderReflection });
+      }
+
+      let index = 0;
+      const next = () => {
+        if (!running) return;
+        if (index >= steps.length) { cleanup(true); return; }
+        const step = steps[index++];
+        labelEl.textContent = `第 ${cue.round} 輪｜${step.label}`;
+        step.render();
+        timer = setTimeout(() => {
+          timer = null;
+          if (step.after) step.after();
+          next();
+        }, step.duration);
+      };
+      next();
+      return true;
+    }
+
+    function skip() {
+      if (running) cleanup(true);
+    }
+
+    function reset() {
+      cleanup(false);
+    }
+
+    skipButton.onclick = skip;
+    globalThis.addEventListener("resize", () => { if (running) align(); });
+    return { play, skip, reset, active: () => running };
+  }
+
   // 大卡詳情：沒有目標時整張卡隱藏（.idle），有目標才浮出。
   // 因為 .cardDetail 是 absolute，出現與消失都不會推擠版面。
   function renderCardDetail(box, type, catalog) {
@@ -430,7 +706,6 @@
   }
 
   // 單機與連線共用的終局文案；endReason 由權威引擎提供，避免兩端各自猜測。
-  // 單機與連線共用的終局文案；endReason 由權威引擎提供，避免兩端各自猜測。
   function resultLabel(view) {
     if (!view || !view.gameOver) return "";
     if (view.winner === "double_loss") return "消極對局：雙方棄賽";
@@ -438,10 +713,771 @@
     return `P${view.winner} 獲勝${view.endReason === "five_line" && view.overtime ? "（加賽）" : ""}`;
   }
 
+  // 終局原因只翻譯引擎已經判定好的 endReason，不在 UI 重新推導勝負。
+  function resultReasonLabel(view) {
+    if (!view || !view.gameOver) return "";
+    if (view.winner === "draw") return "雙方在同一輪完成五連，判定平手。";
+    if (view.endReason === "passivity_forfeit" || view.winner === "double_loss") {
+      const live = liveOvertimeRules();
+      const rounds = view.passivityForfeitRounds
+        ?? view.overtimeRules?.passivityForfeitRounds
+        ?? live?.passivityForfeitRounds;
+      return rounds
+        ? `雙方連續 ${rounds} 輪未發生戰鬥，依規則判雙方棄賽。`
+        : "雙方持續未發生戰鬥，依消極對局規則判雙方棄賽。";
+    }
+    if (view.endReason === "five_line") {
+      return view.overtime
+        ? `P${view.winner} 在加賽戰鬥結算後維持五連；棋盤金框標示致勝五顆。`
+        : `P${view.winner} 在戰鬥結算後維持五連；棋盤金框標示致勝五顆。`;
+    }
+    if (view.endReason === "disconnect_timeout") {
+      return `P${view.forfeitedPlayer} 斷線超過規定時間，判定離場；P${view.winner} 獲勝。`;
+    }
+    return "對局已由引擎完成判定。";
+  }
+
+  // finalFive 是引擎送來的致勝線；這裡只把座標轉成棋盤顯示 class。
+  function finalFiveOwner(view, r, c) {
+    const lines = view?.finalFive;
+    if (!lines) return 0;
+    for (const [key, pid] of [["p1", 1], ["p2", 2]]) {
+      for (const line of lines[key] || []) {
+        if (line.some(cell => cell.r === r && cell.c === c)) return pid;
+      }
+    }
+    return 0;
+  }
+
+  // 按鈕停用原因只整理伺服器／引擎已給的狀態，不複製任何規則數值。
+  function artilleryDisabledReason({ turnReason = "", remaining, usedThisTurn }) {
+    if (turnReason) return turnReason;
+    if (remaining <= 0) return "本場炮擊已用完";
+    if (usedThisTurn) return "本回合已使用炮擊";
+    return "";
+  }
+
+  function endTurnDisabledReason({ turnReason = "", deploymentCommitted = false, canAct = true }) {
+    if (turnReason) return turnReason;
+    if (!deploymentCommitted && canAct) return "請先部署或移動";
+    return "";
+  }
+
+  function rankDisabledReason({ turnReason = "", count, cost, capped, typeName = "該兵種" }) {
+    if (turnReason) return turnReason;
+    if (capped) return `場上已有★★${typeName}`;
+    if (count < cost) return `需要 ${cost} 張，目前只有 ${count} 張`;
+    return "";
+  }
+
+  // 戰鬥紀錄是覆蓋式抽屜：預設收起，開關只改顯示狀態，不參與棋盤版面計算。
+  function wireBattleLogDrawer() {
+    const drawer = document.querySelector("#logDrawer");
+    const toggle = document.querySelector("#logDrawerToggle");
+    const closeButton = document.querySelector("#logDrawerClose");
+    const menu = document.querySelector("#matchMenu");
+    if (!drawer || !toggle || !closeButton) return null;
+
+    let restoreFocus = menu?.querySelector("summary") || toggle;
+    const setOpen = open => {
+      if (open) restoreFocus = menu?.querySelector("summary") || document.activeElement || toggle;
+      drawer.classList.toggle("hidden", !open);
+      drawer.setAttribute("aria-hidden", String(!open));
+      toggle.setAttribute("aria-expanded", String(open));
+      if (menu) menu.open = false;
+      if (open) closeButton.focus();
+      else if (drawer.contains(document.activeElement)) restoreFocus?.focus?.();
+    };
+
+    toggle.addEventListener("click", () => setOpen(true));
+    closeButton.addEventListener("click", () => setOpen(false));
+    drawer.addEventListener("click", event => {
+      if (event.target === drawer) setOpen(false);
+    });
+    document.addEventListener("click", event => {
+      if (menu?.open && !menu.contains(event.target)) menu.open = false;
+    });
+    document.addEventListener("keydown", event => {
+      if (event.key !== "Escape") return;
+      if (!drawer.classList.contains("hidden")) setOpen(false);
+      else if (menu?.open) {
+        menu.open = false;
+        menu.querySelector("summary")?.focus();
+      }
+    });
+    return { close: () => setOpen(false), open: () => setOpen(true) };
+  }
+
   globalThis.AlphaUI = {
     ICONS, NAMES, SHORT_TAG, ELITE_TAG, ABILITY, ELITE_ABILITY,
     handCardHtml, unitHtml, unitTitle, cardDetailHtml, renderCardDetail, rulesHtml, wireRulesOverlay,
     autoSizeBoard, forecast, focusOn, drawForecast, forecastArtillery, drawArtillery,
-    matchPhaseLabel, resultLabel,
+    hasCombatPlayback, createCombatPlayback,
+    matchPhaseLabel, resultLabel, resultReasonLabel, finalFiveOwner,
+    artilleryDisabledReason, endTurnDisabledReason, rankDisabledReason, wireBattleLogDrawer,
   };
+})();
+
+// ---- 觸控操作保護：單機與連線共用 ----
+// 桌機維持原本的一鍵操作；觸控裝置第一次點格只做預覽，第二次點同格或按確認才送給既有 client。
+(() => {
+  const touchLike = typeof matchMedia === "function"
+    && (matchMedia("(hover: none)").matches || matchMedia("(pointer: coarse)").matches);
+  if (!touchLike) return;
+
+  let previewCell = null;
+  let previewMode = null;
+  let previewControls = null;
+  let previewHint = "";
+
+  const board = () => document.querySelector("#board");
+  const status = () => document.querySelector("#turnStatus") || document.querySelector("#status");
+  const rankRow = () => document.querySelector("#rankRow");
+  const artilleryButton = () => document.querySelector("#artilleryBtn");
+  const selectedCard = () => document.querySelector(".card.sel:not(:disabled)");
+  const cells = () => [...(board()?.querySelectorAll(":scope > .cell") || [])];
+
+  function boardSize() {
+    const size = Math.sqrt(cells().length);
+    return Number.isInteger(size) ? size : 0;
+  }
+
+  function coords(cell) {
+    const all = cells();
+    const size = boardSize();
+    const index = all.indexOf(cell);
+    if (index < 0 || !size) return null;
+    return { r: Math.floor(index / size), c: index % size, size };
+  }
+
+  function movementSource() {
+    const match = (status()?.textContent || "").match(/已選\s*\((\d+),(\d+)\)/);
+    return match ? { r: Number(match[1]) - 1, c: Number(match[2]) - 1 } : null;
+  }
+
+  function movementRules() {
+    return globalThis.FiveLineEngine?.GameEngine?.movementRules?.() || null;
+  }
+
+  function legalMoveCell(cell, source = movementSource()) {
+    if (!source || !cell || cell.querySelector(".unit")) return false;
+    const point = coords(cell);
+    const rules = movementRules();
+    if (!point || !rules) return false;
+    const dr = Math.abs(point.r - source.r);
+    const dc = Math.abs(point.c - source.c);
+    const distance = rules.orthogonalOnly ? dr + dc : Math.max(dr, dc);
+    if (rules.orthogonalOnly && dr > 0 && dc > 0) return false;
+    return distance > 0 && distance <= Number(rules.range || 0);
+  }
+
+  function clearMoveHighlights() {
+    for (const cell of cells()) cell.classList.remove("move-source", "move-target");
+  }
+
+  function syncMoveHighlights() {
+    clearMoveHighlights();
+    const source = movementSource();
+    const all = cells();
+    const size = boardSize();
+    if (!source || !size) return;
+    all[source.r * size + source.c]?.classList.add("move-source");
+    for (const cell of all) if (legalMoveCell(cell, source)) cell.classList.add("move-target");
+  }
+
+  function removePreviewControls() {
+    previewControls?.remove();
+    previewControls = null;
+  }
+
+  function clearPreview({ keepMoveHighlights = true } = {}) {
+    if (previewCell) {
+      previewCell.classList.remove(
+        "touch-preview-target", "touch-preview-deploy", "touch-preview-artillery",
+        "touch-preview-move", "touch-preview-blocked"
+      );
+      previewCell.dispatchEvent(new MouseEvent("mouseleave", { bubbles: false }));
+    }
+    previewCell = null;
+    previewMode = null;
+    previewHint = "";
+    removePreviewControls();
+    if (keepMoveHighlights) syncMoveHighlights();
+    else clearMoveHighlights();
+  }
+
+  function currentMode() {
+    const art = artilleryButton();
+    if (art && !art.disabled && art.classList.contains("active")) return "artillery";
+    if (selectedCard()) return "deploy";
+    if (movementSource()) return "move";
+    return null;
+  }
+
+  function previewLabel(mode, point) {
+    const cardName = selectedCard()?.querySelector(".name")?.textContent?.trim();
+    const where = `(${point.r + 1},${point.c + 1})`;
+    if (mode === "artillery") return `炮擊中心 ${where}`;
+    if (mode === "move") return `移動到 ${where}`;
+    if (mode === "blocked") return "這格目前不能移動";
+    return `${cardName ? `${cardName} ` : ""}部署到 ${where}`;
+  }
+
+  function renderPreviewControls() {
+    removePreviewControls();
+    const row = rankRow();
+    if (!row || !previewCell || !previewMode) return;
+    const point = coords(previewCell);
+    if (!point && previewMode !== "blocked") return;
+
+    const wrap = document.createElement("div");
+    wrap.className = "touchPreviewControls";
+    const hint = document.createElement("span");
+    hint.className = "touchPreviewHint";
+    hint.textContent = previewHint || previewLabel(previewMode, point || { r: 0, c: 0 });
+
+    const confirm = document.createElement("button");
+    confirm.type = "button";
+    confirm.className = "btn touchConfirmBtn";
+    confirm.disabled = previewMode === "blocked";
+    confirm.textContent = previewMode === "blocked"
+      ? "不可移動"
+      : previewMode === "artillery" ? "確認炮擊" : previewMode === "move" ? "確認移動" : "確認部署";
+    confirm.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const target = previewCell;
+      if (!confirm.disabled && target) target.click();
+    });
+
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "btn touchCancelBtn";
+    cancel.textContent = "取消";
+    cancel.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      clearPreview();
+    });
+
+    wrap.append(hint, confirm, cancel);
+    row.appendChild(wrap);
+    previewControls = wrap;
+  }
+
+  function setPreview(cell, mode, hint = "") {
+    clearPreview();
+    previewCell = cell;
+    previewMode = mode;
+    previewHint = hint;
+    cell.classList.add("touch-preview-target", `touch-preview-${mode}`);
+    if (mode !== "blocked") cell.dispatchEvent(new MouseEvent("mouseenter", { bubbles: false }));
+    renderPreviewControls();
+  }
+
+  document.addEventListener("click", event => {
+    const cell = event.target.closest?.("#board > .cell");
+    if (!cell) {
+      const control = event.target.closest?.(".card, #rankRow .btn, #artilleryBtn, #endTurnBtn");
+      if (control && !control.closest?.(".touchPreviewControls") && previewCell) clearPreview();
+      return;
+    }
+
+    const mode = currentMode();
+    if (!mode) {
+      clearPreview();
+      return;
+    }
+
+    if (mode === "move") {
+      const source = movementSource();
+      if (!source) return;
+      if (cell.querySelector(".unit")) {
+        clearPreview();
+        return;
+      }
+      if (!legalMoveCell(cell, source)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        setPreview(cell, "blocked", "這格不在目前可移動範圍，請改選亮起的格子。");
+        return;
+      }
+    }
+
+    if (previewCell === cell && previewMode === mode) {
+      clearPreview();
+      queueMicrotask(syncMoveHighlights);
+      return;
+    }
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    setPreview(cell, mode);
+  }, true);
+
+  document.addEventListener("click", event => {
+    const target = event.target.closest?.(".card, #rankRow .btn, #artilleryBtn, #endTurnBtn");
+    if (!target || target.closest?.(".touchPreviewControls")) return;
+    queueMicrotask(syncMoveHighlights);
+  });
+
+  document.addEventListener("keydown", event => {
+    if (event.key !== "Escape" || !previewCell) return;
+    if (["INPUT", "TEXTAREA", "SELECT"].includes(event.target?.tagName)) return;
+    event.preventDefault();
+    clearPreview();
+  });
+
+  const watchStatus = status();
+  if (watchStatus) {
+    new MutationObserver(() => queueMicrotask(syncMoveHighlights))
+      .observe(watchStatus, { childList: true, subtree: true, characterData: true });
+  }
+  const watchBoard = board();
+  if (watchBoard) {
+    new MutationObserver(() => {
+      if (previewCell && !previewCell.isConnected) clearPreview();
+      queueMicrotask(syncMoveHighlights);
+    }).observe(watchBoard, { childList: true });
+  }
+
+  syncMoveHighlights();
+})();
+
+// ---- 回合流程與戰鬥可讀性：只解讀既有 UI 狀態與權威 lastCombat，不重算規則 ----
+(() => {
+  const UI = globalThis.AlphaUI;
+  if (!UI || UI.__readabilityEnhancement) return;
+  UI.__readabilityEnhancement = true;
+
+  const style = document.createElement("style");
+  style.textContent = `
+    .turnFlowGuide{flex:0 0 auto;min-width:280px;display:grid;grid-template-rows:23px 16px;gap:1px;padding:4px 8px;border:1px solid #4b4437;border-radius:10px;background:linear-gradient(145deg,rgba(44,42,36,.96),rgba(25,26,23,.96));box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
+    .turnFlowSteps{display:flex;align-items:center;gap:4px;white-space:nowrap}.turnFlowStep{padding:3px 7px;border:1px solid #4c4a43;border-radius:999px;color:#928b7f;font-size:10px;font-weight:900;line-height:1}.turnFlowStep.done{border-color:#58765e;color:#b9ddb9;background:rgba(71,111,76,.18)}.turnFlowStep.active{border-color:#d9b96d;color:#fff0b3;background:rgba(125,96,31,.33);box-shadow:0 0 12px rgba(217,185,109,.18)}.turnFlowStep.optional{border-style:dashed;color:#cdbb91}.turnFlowStep.unavailable{opacity:.48;text-decoration:line-through}.turnFlowStep.wait{border-color:#516274;color:#b9cee3}.turnFlowBrief{min-width:0;overflow:hidden;color:#a9a18f;font-size:10px;font-weight:700;text-overflow:ellipsis;white-space:nowrap}.turnFlowGuide.waiting .turnFlowBrief{color:#b7c7d8}.turnFlowGuide.combat .turnFlowBrief{color:#f0cf7c}
+    .combatReadabilityPanel{position:absolute;z-index:5;top:48px;left:7px;right:7px;display:flex;align-items:center;justify-content:space-between;gap:7px;pointer-events:none}.combatRoundMeta{display:flex;gap:4px;flex-wrap:wrap}.combatMetaChip{padding:4px 7px;border:1px solid rgba(255,255,255,.18);border-radius:999px;background:rgba(9,12,16,.82);color:#e9edf2;font-size:10px;font-weight:900;box-shadow:0 3px 10px rgba(0,0,0,.3)}.combatMetaChip.p1{border-color:#ff8787;color:#ffd2d2}.combatMetaChip.p2{border-color:#74c0fc;color:#d5edff}.combatStepStrip{display:flex;gap:3px}.combatStepPill{padding:4px 7px;border:1px solid rgba(255,255,255,.14);border-radius:999px;background:rgba(9,12,16,.76);color:#868f9a;font-size:9px;font-weight:900}.combatStepPill.done{color:#b9d7bc;border-color:#52745a}.combatStepPill.active{color:#fff0b3;border-color:#d9b96d;background:rgba(98,76,26,.84)}
+    .combatDeathTag{position:absolute;z-index:6;transform:translate(-50%,-50%);padding:3px 6px;border:1px solid #d75d5d;border-radius:999px;background:rgba(27,10,10,.9);color:#ffd6d6;font-size:clamp(8px,1.15vw,11px);font-weight:1000;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .12s ease,transform .12s ease}.combatDeathTag.show{opacity:1;transform:translate(-50%,-95%)}.combatDeathTag.p2{border-color:#6b9ec7;background:rgba(8,20,31,.92);color:#d6eeff}
+    @media(max-width:760px){.turnFlowGuide{min-width:240px}.turnFlowStep{padding:3px 5px;font-size:9px}.combatReadabilityPanel{top:45px;align-items:flex-start}.combatRoundMeta{max-width:62%}.combatStepPill{padding:3px 5px}.combatMetaChip{padding:3px 5px;font-size:9px}}
+    @media(max-width:520px){.turnFlowGuide{min-width:214px}.turnFlowStep{font-size:8px}.turnFlowBrief{font-size:9px}.combatStepStrip{display:none}.combatRoundMeta{max-width:100%}}
+  `;
+  document.head.appendChild(style);
+
+  const top = document.querySelector("#gameScreen .gameTop") || document.querySelector(".top");
+  const flow = document.createElement("div");
+  flow.className = "turnFlowGuide";
+  flow.setAttribute("aria-label", "本回合操作流程");
+  const stepRow = document.createElement("div");
+  stepRow.className = "turnFlowSteps";
+  const flowDefs = [
+    ["action", "① 行動", "部署；手牌用盡時依規則移動"],
+    ["artillery", "② 炮擊", "可選，不取代主要行動"],
+    ["end", "③ 結束", "主要行動完成後交棒"],
+    ["combat", "④ 結算", "雙方都結束後統一戰鬥結算"],
+  ];
+  const flowSteps = new Map();
+  for (const [key, label, title] of flowDefs) {
+    const node = document.createElement("span");
+    node.className = "turnFlowStep";
+    node.dataset.flowStep = key;
+    node.textContent = label;
+    node.title = title;
+    stepRow.appendChild(node);
+    flowSteps.set(key, node);
+  }
+  const brief = document.createElement("div");
+  brief.className = "turnFlowBrief";
+  brief.setAttribute("aria-live", "polite");
+  brief.textContent = "尚未結算戰鬥";
+  flow.append(stepRow, brief);
+  if (top) {
+    const help = top.querySelector("#helpBtn");
+    top.insertBefore(flow, help || null);
+  }
+
+  const statusEl = () => document.querySelector("#turnStatus") || document.querySelector("#status");
+  const endButton = () => document.querySelector("#endTurnBtn");
+  const artilleryButton = () => document.querySelector("#artilleryBtn");
+  const combatStage = () => document.querySelector("#combatStage");
+  const setStep = (key, state) => {
+    const node = flowSteps.get(key);
+    if (!node) return;
+    node.className = `turnFlowStep ${state || ""}`.trim();
+  };
+
+  function syncFlow() {
+    const status = statusEl();
+    const end = endButton();
+    const art = artilleryButton();
+    const stage = combatStage();
+    if (!end || !art) return;
+    const text = `${status?.textContent || ""} ${end.textContent || ""} ${end.title || ""} ${art.textContent || ""} ${art.title || ""}`;
+    const combatActive = Boolean(stage && !stage.classList.contains("hidden"));
+    const gameOver = /對局結束|本局已結束/.test(text);
+    const waiting = /操作暫停|等待對方|等待對手|不是你的回合|電腦正在行動|等待伺服器|尚未連上|對手已斷線/.test(text);
+    const mainDone = !end.disabled || /主要行動.*完成|已完成部署|目前已無法部署或移動|請按「結束回合」/.test(text);
+    const artilleryUsed = /本回合已使用炮擊|炮擊已使用/.test(text);
+    const artilleryEmpty = /本場炮擊已用完/.test(text);
+    flow.classList.toggle("combat", combatActive);
+    flow.classList.toggle("waiting", waiting && !combatActive);
+
+    if (gameOver) {
+      for (const key of flowSteps.keys()) setStep(key, "done");
+      return;
+    }
+    if (combatActive) {
+      setStep("action", "done");
+      setStep("artillery", artilleryUsed ? "done" : artilleryEmpty ? "unavailable" : "optional");
+      setStep("end", "done");
+      setStep("combat", "active");
+      return;
+    }
+    if (waiting) {
+      setStep("action", "wait");
+      setStep("artillery", artilleryEmpty ? "unavailable" : "wait");
+      setStep("end", "wait");
+      setStep("combat", "wait");
+      return;
+    }
+    setStep("action", mainDone ? "done" : "active");
+    setStep("artillery", artilleryUsed ? "done" : artilleryEmpty ? "unavailable"
+      : art.classList.contains("active") ? "active" : "optional");
+    setStep("end", mainDone && !end.disabled ? "active" : "");
+    setStep("combat", "wait");
+  }
+
+  const watched = [statusEl(), endButton(), artilleryButton(), combatStage()].filter(Boolean);
+  const flowObserver = new MutationObserver(() => queueMicrotask(syncFlow));
+  for (const node of watched) {
+    flowObserver.observe(node, { attributes: true, childList: true, subtree: true, characterData: true });
+  }
+  document.addEventListener("click", () => queueMicrotask(syncFlow));
+  syncFlow();
+
+  const originalCreatePlayback = UI.createCombatPlayback;
+  const typeLabel = type => UI.NAMES?.[type] || type || "單位";
+  const stats = cue => {
+    const packets = cue?.packets || [];
+    const deaths = cue?.deaths || [];
+    return {
+      p1Attack: packets.filter(item => item.from?.pid === 1).length,
+      p2Attack: packets.filter(item => item.from?.pid === 2).length,
+      p1Death: deaths.filter(item => item.unit?.pid === 1).length,
+      p2Death: deaths.filter(item => item.unit?.pid === 2).length,
+      cleaves: (cue?.cleaves || []).length,
+      reflections: (cue?.reflections || []).length,
+    };
+  };
+  function briefText(cue, live = false) {
+    if (!cue) return "尚未結算戰鬥";
+    const s = stats(cue);
+    const specials = [s.cleaves ? `斬入${s.cleaves}` : "", s.reflections ? `反震${s.reflections}` : ""].filter(Boolean).join("／");
+    if (!s.p1Attack && !s.p2Attack && !s.p1Death && !s.p2Death) return `R${cue.round}｜本輪沒有交戰`;
+    return `${live ? `R${cue.round} 結算中` : `上一輪 R${cue.round}`}｜攻擊 P1 ${s.p1Attack}／P2 ${s.p2Attack}`
+      + `｜陣亡 P1 ${s.p1Death}／P2 ${s.p2Death}${specials ? `｜${specials}` : ""}`;
+  }
+
+  UI.createCombatPlayback = options => {
+    let panel = null;
+    let labelObserver = null;
+    let piecesObserver = null;
+    const originalFinish = options?.onFinish;
+    const wrapped = originalCreatePlayback({
+      ...options,
+      onFinish: finishedCue => {
+        brief.textContent = briefText(finishedCue, false);
+        clearDecorations();
+        syncFlow();
+        if (typeof originalFinish === "function") originalFinish(finishedCue);
+      },
+    });
+
+    function clearDecorations() {
+      labelObserver?.disconnect();
+      piecesObserver?.disconnect();
+      labelObserver = null;
+      piecesObserver = null;
+      panel?.remove();
+      panel = null;
+    }
+
+    function syncDeathTags() {
+      if (!options?.piecesEl) return;
+      for (const tag of options.piecesEl.querySelectorAll(".combatDeathTag")) {
+        const id = tag.dataset.unitId;
+        const piece = options.piecesEl.querySelector(`.combatDeathPiece[data-unit-id="${id}"]`);
+        tag.classList.toggle("show", Boolean(piece?.classList.contains("combatDeathFading")));
+      }
+    }
+
+    function decorate(cue) {
+      clearDecorations();
+      const stage = options?.stageEl;
+      const label = options?.labelEl;
+      const pieces = options?.piecesEl;
+      if (!stage || !label || !pieces) return;
+      const s = stats(cue);
+      panel = document.createElement("div");
+      panel.className = "combatReadabilityPanel";
+      const meta = document.createElement("div");
+      meta.className = "combatRoundMeta";
+      const chips = [
+        ["p1", `P1 攻 ${s.p1Attack}`], ["p2", `P2 攻 ${s.p2Attack}`],
+        ["p1", `☠ P1 ${s.p1Death}`], ["p2", `☠ P2 ${s.p2Death}`],
+      ];
+      for (const [kind, text] of chips) {
+        const chip = document.createElement("span");
+        chip.className = `combatMetaChip ${kind}`;
+        chip.textContent = text;
+        meta.appendChild(chip);
+      }
+      const strip = document.createElement("div");
+      strip.className = "combatStepStrip";
+      const defs = [["主攻擊", "攻擊"], ["傷害與陣亡", "傷害"]];
+      if (s.cleaves) defs.push(["斬入", "斬入"]);
+      if (s.reflections) defs.push(["反震", "反震"]);
+      const stepNodes = defs.map(([match, text]) => {
+        const node = document.createElement("span");
+        node.className = "combatStepPill";
+        node.dataset.match = match;
+        node.textContent = text;
+        strip.appendChild(node);
+        return node;
+      });
+      panel.append(meta, strip);
+      stage.appendChild(panel);
+
+      for (const death of cue.deaths || []) {
+        const tag = document.createElement("div");
+        tag.className = `combatDeathTag p${death.unit.pid}`;
+        tag.dataset.unitId = String(death.unit.id);
+        tag.style.left = `${(death.c + .5) / 9 * 100}%`;
+        tag.style.top = `${(death.r + .5) / 9 * 100}%`;
+        tag.textContent = `☠ P${death.unit.pid} ${"★".repeat(death.unit.rank || 1)}${typeLabel(death.unit.type)}`;
+        pieces.appendChild(tag);
+      }
+
+      const syncSteps = () => {
+        const text = label.textContent || "";
+        let activeIndex = stepNodes.findIndex(node => text.includes(node.dataset.match));
+        if (activeIndex < 0) activeIndex = 0;
+        stepNodes.forEach((node, index) => {
+          node.classList.toggle("done", index < activeIndex);
+          node.classList.toggle("active", index === activeIndex);
+        });
+      };
+      labelObserver = new MutationObserver(syncSteps);
+      labelObserver.observe(label, { childList: true, subtree: true, characterData: true });
+      piecesObserver = new MutationObserver(syncDeathTags);
+      piecesObserver.observe(pieces, { attributes: true, childList: true, subtree: true, attributeFilter: ["class"] });
+      syncSteps();
+      syncDeathTags();
+    }
+
+    return {
+      play(cue) {
+        brief.textContent = briefText(cue, true);
+        const ok = wrapped.play(cue);
+        if (ok) decorate(cue);
+        else brief.textContent = briefText(cue, false);
+        syncFlow();
+        return ok;
+      },
+      skip() {
+        wrapped.skip();
+        clearDecorations();
+        syncFlow();
+      },
+      reset() {
+        wrapped.reset();
+        clearDecorations();
+        brief.textContent = "尚未結算戰鬥";
+        syncFlow();
+      },
+      active: wrapped.active,
+    };
+  };
+})();
+
+// ---- 主動戰術檢視：只解讀玩家正在查看的單格，不做全盤五連威脅提示 ----
+(() => {
+  const UI = globalThis.AlphaUI;
+  if (!UI || UI.__tacticalInspect) return;
+  UI.__tacticalInspect = true;
+
+  const originalFocusOn = UI.focusOn;
+  const originalDrawForecast = UI.drawForecast;
+
+  UI.focusOn = (result, r, c) => {
+    const base = originalFocusOn(result, r, c);
+    if (!base || !result) return base;
+
+    const rawOutgoing = (result.packets || []).filter(packet => packet.from.r === r && packet.from.c === c);
+    const rawIncoming = (result.packets || []).filter(packet => packet.to.r === r && packet.to.c === c);
+    const damage = (result.damage || []).find(item => item.r === r && item.c === c) || null;
+    const subject = rawOutgoing[0]?.from || rawIncoming[0]?.to
+      || (damage ? { unitId: damage.unitId, pid: damage.pid, type: damage.type } : null);
+    const subjectId = subject?.unitId ?? damage?.unitId ?? null;
+    const guardsFor = result.guards?.[`${r},${c}`] || [];
+    const guardingTargets = Object.entries(result.guards || {})
+      .filter(([, guards]) => guards.some(guard => guard.r === r && guard.c === c))
+      .map(([key]) => {
+        const [rr, cc] = key.split(",").map(Number);
+        return { r: rr, c: cc };
+      });
+    const diesById = subjectId !== null
+      && (result.deaths || []).some(item => String(item.unit?.id) === String(subjectId));
+
+    return {
+      ...base,
+      point: { r, c },
+      subject,
+      selfDies: diesById || base.selfDies,
+      outgoingDamage: base.outgoing.reduce((sum, item) => sum + item.amount, 0),
+      incomingDamage: damage?.damage || 0,
+      hpAfter: damage ? Math.max(0, Math.round(damage.hpAfter)) : null,
+      guardsFor,
+      guardingTargets,
+      counterOutgoing: rawOutgoing.filter(packet => Number(packet.counterBonus) > 0).length,
+      counterIncoming: rawIncoming.filter(packet => Number(packet.counterBonus) > 0).length,
+    };
+  };
+
+  UI.drawForecast = (layer, boardEl, view, focus) => {
+    originalDrawForecast(layer, boardEl, view, focus);
+    if (!layer || !boardEl || !focus?.point) return;
+    const size = boardEl.clientWidth;
+    if (!size) return;
+    const cell = size / 9;
+    const add = (tag, attrs, text) => {
+      const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+      for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+      if (text !== undefined) node.textContent = text;
+      layer.appendChild(node);
+      return node;
+    };
+    const unique = list => {
+      const seen = new Set();
+      return list.filter(point => {
+        const key = `${point.r},${point.c}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+    const ring = (point, className, inset = 3) => add("rect", {
+      class: className,
+      x: point.c * cell + inset,
+      y: point.r * cell + inset,
+      width: cell - inset * 2,
+      height: cell - inset * 2,
+      rx: Math.max(4, cell * .09),
+    });
+
+    for (const point of unique(focus.incoming.map(item => item.from))) ring(point, "fcSourceRing", 4);
+    for (const point of unique(focus.outgoing.map(item => item.to))) ring(point, "fcTargetRing", 4);
+    for (const point of unique(focus.guardsFor || [])) ring(point, "fcGuardRing", 6);
+    for (const point of unique(focus.guardingTargets || [])) ring(point, "fcGuardTargetRing", 7);
+    ring(focus.point, `fcFocusRing ${focus.selfDies ? "danger" : focus.incomingDamage > 0 ? "engaged" : "active"}`, 2);
+
+    const typeName = UI.NAMES?.[focus.subject?.type] || "單位";
+    const label = focus.selfDies ? "致命危險"
+      : focus.incomingDamage > 0 && focus.outgoingDamage > 0 ? "交戰"
+        : focus.incomingDamage > 0 ? "受擊"
+          : focus.outgoingDamage > 0 ? "主攻" : "觀察";
+    const tone = focus.selfDies ? "danger" : focus.incomingDamage > 0 ? "engaged" : "active";
+    const extras = [];
+    if (focus.guardsFor?.length) extras.push(`護衛×${focus.guardsFor.length}`);
+    if (focus.guardingTargets?.length) extras.push(`護援×${focus.guardingTargets.length}`);
+    if (focus.counterOutgoing) extras.push(`克制×${focus.counterOutgoing}`);
+    if (focus.counterIncoming) extras.push(`被克制×${focus.counterIncoming}`);
+    if (focus.selfDies) extras.push("預測陣亡");
+    else if (focus.hpAfter !== null) extras.push(`預測HP ${focus.hpAfter}`);
+
+    const cardW = Math.max(140, Math.min(210, size - 12));
+    const cardH = 58;
+    const x = focus.point.c >= 4 ? 6 : size - cardW - 6;
+    const y = focus.point.r >= 4 ? 6 : size - cardH - 6;
+    add("rect", { class: `fcTacticalBg ${tone}`, x, y, width: cardW, height: cardH, rx: 10 });
+    add("text", { class: `fcTacticalTitle ${tone}`, x: x + 10, y: y + 17 },
+      `${focus.subject?.pid ? `P${focus.subject.pid} ` : ""}${typeName}｜${label}`);
+    add("text", { class: "fcTacticalLine", x: x + 10, y: y + 34 },
+      `攻 ${Math.round(focus.outgoingDamage || 0)} → ${focus.outgoing.length}　承 ${Math.round(focus.incomingDamage || 0)} ← ${focus.incoming.length}`);
+    add("text", { class: `fcTacticalMeta ${focus.selfDies ? "danger" : ""}`, x: x + 10, y: y + 50 },
+      extras.join("｜") || "目前只顯示這一格的交戰關係");
+  };
+
+  const style = document.createElement("style");
+  style.textContent = `
+    .fcLine.out{stroke:#f0a45e;stroke-width:3;filter:drop-shadow(0 0 3px rgba(240,164,94,.42))}
+    .fcLine.in{stroke:#6db9e8;stroke-width:3;stroke-dasharray:6 4;filter:drop-shadow(0 0 3px rgba(109,185,232,.4))}
+    .fcHead.out{fill:#f0a45e}.fcHead.in{fill:#6db9e8}
+    .fcTargetRing{fill:none;stroke:#f0a45e;stroke-width:2.4;stroke-dasharray:2 3}
+    .fcSourceRing{fill:none;stroke:#6db9e8;stroke-width:2.4;stroke-dasharray:5 3}
+    .fcGuardRing{fill:none;stroke:#75c982;stroke-width:2.6}
+    .fcGuardTargetRing{fill:none;stroke:#75c982;stroke-width:2;stroke-dasharray:3 4}
+    .fcFocusRing{fill:none;stroke:#e7c875;stroke-width:3.4;filter:drop-shadow(0 0 5px rgba(231,200,117,.55))}
+    .fcFocusRing.engaged{stroke:#e08b5c}.fcFocusRing.danger{stroke:#ef6868;stroke-width:4;stroke-dasharray:5 3}
+    .fcTacticalBg{fill:rgba(15,17,16,.93);stroke:#7d715a;stroke-width:1.5;filter:drop-shadow(0 5px 8px rgba(0,0,0,.42))}
+    .fcTacticalBg.engaged{stroke:#d28a5f}.fcTacticalBg.danger{stroke:#e46868}
+    .fcTacticalTitle{fill:#f3e7ca;font-size:12px;font-weight:900}.fcTacticalTitle.engaged{fill:#ffd0b1}.fcTacticalTitle.danger{fill:#ffd0d0}
+    .fcTacticalLine{fill:#e8e1d5;font-size:10px;font-weight:800}.fcTacticalMeta{fill:#b8ad99;font-size:9px;font-weight:700}.fcTacticalMeta.danger{fill:#ffb8b8}
+    .cell.touch-inspect-cell .unit{box-shadow:0 0 0 3px rgba(231,200,117,.72),0 0 18px rgba(231,200,117,.55)!important}
+    @media(max-width:520px){
+      .fcTacticalTitle{font-size:10px}.fcTacticalLine{font-size:8.5px}.fcTacticalMeta{font-size:8px}
+    }
+  `;
+  document.head.appendChild(style);
+
+  const touchLike = typeof matchMedia === "function"
+    && (matchMedia("(hover: none)").matches || matchMedia("(pointer: coarse)").matches);
+  if (!touchLike) return;
+
+  let inspectCell = null;
+  const board = () => document.querySelector("#board");
+  const status = () => document.querySelector("#turnStatus") || document.querySelector("#status");
+  const hasActionMode = () => {
+    const art = document.querySelector("#artilleryBtn");
+    if (art && !art.disabled && art.classList.contains("active")) return true;
+    if (document.querySelector(".card.sel:not(:disabled)")) return true;
+    const text = status()?.textContent || "";
+    return /手牌已用盡|本回合改為移動|已選\s*\(\d+,\d+\)/.test(text);
+  };
+  const combatActive = () => {
+    const stage = document.querySelector("#combatStage");
+    return Boolean(stage && !stage.classList.contains("hidden"));
+  };
+  const clearInspect = () => {
+    if (inspectCell?.isConnected) {
+      inspectCell.classList.remove("touch-inspect-cell");
+      inspectCell.dispatchEvent(new MouseEvent("mouseleave", { bubbles: false }));
+    }
+    inspectCell = null;
+  };
+
+  document.addEventListener("click", event => {
+    const cell = event.target.closest?.("#board > .cell");
+    if (!cell || !cell.querySelector(".unit") || hasActionMode() || combatActive()) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    if (inspectCell === cell) {
+      clearInspect();
+      return;
+    }
+    clearInspect();
+    inspectCell = cell;
+    cell.classList.add("touch-inspect-cell");
+    cell.dispatchEvent(new MouseEvent("mouseenter", { bubbles: false }));
+  }, true);
+
+  document.addEventListener("click", event => {
+    if (!inspectCell) return;
+    if (event.target.closest?.(".card, #artilleryBtn, #endTurnBtn, #rankRow .btn, .matchMenu, .overlay")) clearInspect();
+  });
+
+  const boardEl = board();
+  if (boardEl) {
+    new MutationObserver(() => {
+      if (inspectCell && !inspectCell.isConnected) inspectCell = null;
+    }).observe(boardEl, { childList: true });
+  }
 })();

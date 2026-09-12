@@ -44,6 +44,9 @@ const OVERTIME_RULES = Object.freeze({ graceRounds: 3, decayRate: 0.10, decayBas
 // 手牌用完時的唯一出路：把自己的一顆棋往正交相鄰的空格移動一格。
 // 這不是通用移動系統——有牌可以部署時不能移動。
 const MOVE_RULES = Object.freeze({ range: 1, orthogonalOnly: true, onlyWhenCannotDeploy: true });
+// 專案擁有者定案：每回合 20 秒；斷線 40 秒後判離。秒數只在引擎定義，
+// 伺服器與兩個客戶端一律讀 timeoutRules()，避免各端各抄一份。
+const TIMEOUT_RULES = Object.freeze({ turnMs: 20_000, disconnectMs: 40_000 });
 const ORTHOGONAL = Object.freeze([[1, 0], [-1, 0], [0, 1], [0, -1]]);
 const FIVE_DIRECTIONS = Object.freeze([[1, 0], [0, 1], [1, 1], [1, -1]]);
 
@@ -83,10 +86,11 @@ function counterBonus(attacker, defender) {
 }
 
 class GameEngine {
-  constructor({ matchId, roomCode, randomInt, turnOrderMode = "alternating", startingPlayer } = {}) {
+  constructor({ matchId, roomCode, randomInt, turnOrderMode = "alternating", startingPlayer, now } = {}) {
     this.matchId = matchId || randomUUID();
     this.roomCode = roomCode || "TEST00";
     this.randomInt = randomInt || (max => randomBelow(max));
+    this.now = typeof now === "function" ? now : () => Date.now();
     this.turnOrderMode = turnOrderMode === "fixed" ? "fixed" : "alternating";
     this.startingPlayer = this.turnOrderMode === "fixed"
       ? (startingPlayer === 1 || startingPlayer === 2 ? startingPlayer : this.randomInt(2) + 1)
@@ -99,9 +103,13 @@ class GameEngine {
     this.actionsThisRound = 0;
     this.artilleryUsedThisTurn = false;
     this.deploymentCommitted = false;
+    this.turnDeadline = null;
+    this.turnClockPausedAt = null;
+    this.turnRemainingMs = null;
     this.gameOver = false;
     this.winner = null;
     this.endReason = null;
+    this.forfeitedPlayer = null;
     this.overtime = false;
     this.overtimeStartRound = null;
     this.quietRounds = 0;
@@ -109,14 +117,15 @@ class GameEngine {
     this.combatResolutionCount = 0;
     this.logs = [];
     this.artilleryEvents = [];
-    this.startedAt = new Date().toISOString();
+    this.startedAt = new Date(this.now()).toISOString();
     this.endedAt = null;
     this.roundRecords = [];
     this.cardConservationAudits = [];
     this.drawToFive(1);
     this.drawToFive(2);
     this.ensureRoundRecord();
-    this.addLog("sys", `遊戲開始。第一輪由 P${this.startingPlayer} 先行；每輪完成雙方部署後由伺服器同步結算戰鬥。`);
+    this.beginTurnClock();
+    this.addLog("sys", `遊戲開始。第一輪由 P${this.startingPlayer} 先行；每輪完成雙方回合後由伺服器同步結算戰鬥。`);
     this.auditCardConservation("game_start");
   }
 
@@ -179,6 +188,35 @@ class GameEngine {
     this.drawToFive(pid);
   }
 
+  beginTurnClock(now = this.now()) {
+    this.turnDeadline = now + TIMEOUT_RULES.turnMs;
+    this.turnClockPausedAt = null;
+    this.turnRemainingMs = TIMEOUT_RULES.turnMs;
+  }
+
+  pauseTurnClock(now = this.now()) {
+    if (this.gameOver || this.turnClockPausedAt !== null) return;
+    this.turnRemainingMs = Math.max(0, this.turnDeadline - now);
+    this.turnClockPausedAt = now;
+  }
+
+  resumeTurnClock(now = this.now()) {
+    if (this.gameOver || this.turnClockPausedAt === null) return;
+    this.turnDeadline = now + this.turnRemainingMs;
+    this.turnClockPausedAt = null;
+  }
+
+  turnClockState(now = this.now()) {
+    const paused = this.turnClockPausedAt !== null;
+    return {
+      deadline: paused || this.gameOver ? null : this.turnDeadline,
+      paused,
+      remainingMs: this.gameOver ? 0 : paused
+        ? this.turnRemainingMs
+        : Math.max(0, this.turnDeadline - now),
+    };
+  }
+
   consumeCards(pid, type, count) {
     const hand = this.players[pid - 1].hand;
     if (hand.filter(card => card === type).length < count) return false;
@@ -229,7 +267,7 @@ class GameEngine {
   validateActor(pid, turnId) {
     if (this.gameOver) return "本局已結束";
     if (pid !== 1 && pid !== 2) return "無效玩家";
-    if (!Number.isInteger(turnId) || turnId !== this.turnId) return "操作已過期；本回合正常行動已完成";
+    if (!Number.isInteger(turnId) || turnId !== this.turnId) return "操作已過期；本回合已結束";
     if (pid !== this.current) return "現在不是你的回合";
     return null;
   }
@@ -262,9 +300,8 @@ class GameEngine {
     const action = { kind: "deploy", pid, r, c, type, rank, cards: cost };
     this.ensureRoundRecord().actions.push(action);
     this.addLog(pid === 1 ? "r" : "b", `P${pid} 在 (${r + 1},${c + 1}) 部署 ${"★".repeat(rank)}${TYPES[type].name}`, action);
-    const transition = this.finishDeployment();
     this.auditCardConservation(`deploy_p${pid}`);
-    return { ok: true, action, transition };
+    return { ok: true, action, transition: { roundResolved: false, awaitingEndTurn: true } };
   }
 
   // 沒牌可放時的替代行動：移動一格。與部署一樣佔掉本回合的行動。
@@ -290,21 +327,19 @@ class GameEngine {
     this.addLog(pid === 1 ? "r" : "b",
       `P${pid} 手牌用盡，將 ${"★".repeat(unit.rank)}${TYPES[unit.type].name} 從 (${r + 1},${c + 1}) 移動到 (${toR + 1},${toC + 1})`,
       action);
-    const transition = this.finishDeployment();
     this.auditCardConservation(`move_p${pid}`);
-    return { ok: true, action, transition };
+    return { ok: true, action, transition: { roundResolved: false, awaitingEndTurn: true } };
   }
 
   artillery(pid, { r, c, turnId }) {
     const actorError = this.validateActor(pid, turnId);
     if (actorError) return { ok: false, error: actorError };
-    if (this.deploymentCommitted) return { ok: false, error: "炮擊只能在部署前使用" };
     if (this.artilleryUsedThisTurn) return { ok: false, error: "同一回合最多使用一次炮擊" };
     if (!inBounds(r, c)) return { ok: false, error: "炮擊位置超出棋盤" };
     const player = this.players[pid - 1];
     if (player.artillery <= 0) return { ok: false, error: "本場炮擊已用完" };
-    if (!player.hand.length || !this.hasEmptyCell()) {
-      return { ok: false, error: "炮擊後必須能完成正常部署" };
+    if (!this.deploymentCommitted && !this.canAct(pid)) {
+      return { ok: false, error: "炮擊後必須能完成部署或移動" };
     }
 
     const enemyPid = pid === 1 ? 2 : 1;
@@ -351,6 +386,42 @@ class GameEngine {
     this.addLog("sys", `炮擊分析：阻止四連 ${event.preventedFour}｜阻止五連 ${event.preventedFive}｜擊殺 ${kills.length}｜新空格 ${event.createdSpaces}｜命中敵軍 ${enemyHits}｜命中友軍 ${friendlyHits}`, event);
     this.auditCardConservation(`artillery_p${pid}`);
     return { ok: true, event };
+  }
+
+  // 部署／移動只提交本回合的主要行動；玩家仍可補一次炮擊，最後明確結束回合。
+  // automatic 只供權威逾時機制使用：逾時時即使尚未提交主要行動也必須放行，
+  // 否則惡意玩家仍能靠永遠不操作卡住對局。
+  endTurn(pid, { turnId, automatic = false } = {}) {
+    const actorError = this.validateActor(pid, turnId);
+    if (actorError) return { ok: false, error: actorError };
+    if (!automatic && !this.deploymentCommitted && this.canAct(pid)) {
+      return { ok: false, error: "請先完成部署或移動，再結束回合" };
+    }
+    if (automatic) this.addLog("sys", `P${pid} 回合逾時，伺服器已自動結束回合。`);
+    const transition = this.finishTurn();
+    return { ok: true, automatic, transition };
+  }
+
+  checkTurnTimeout(now = this.now()) {
+    if (this.gameOver || this.turnClockPausedAt !== null || now < this.turnDeadline) return null;
+    return this.endTurn(this.current, { turnId: this.turnId, automatic: true });
+  }
+
+  forfeit(pid, reason = "disconnect_timeout") {
+    if (this.gameOver) return { ok: false, error: "本局已結束" };
+    if (pid !== 1 && pid !== 2) return { ok: false, error: "無效玩家" };
+    this.gameOver = true;
+    this.winner = pid === 1 ? 2 : 1;
+    this.endReason = reason;
+    this.forfeitedPlayer = pid;
+    this.endedAt = new Date(this.now()).toISOString();
+    this.finalFive = { p1: [], p2: [] };
+    this.turnDeadline = null;
+    this.turnClockPausedAt = null;
+    this.turnRemainingMs = 0;
+    const label = reason === "disconnect_timeout" ? "斷線逾時" : "離場";
+    this.addLog("winner", `P${pid} ${label}，P${this.winner} 獲勝。`, { forfeitedPlayer: pid, reason });
+    return { ok: true, winner: this.winner, reason };
   }
 
   hasEmptyCell() {
@@ -515,15 +586,16 @@ class GameEngine {
       damageResults.push({ r, c, unitId: unit.id, pid: unit.pid, type: unit.type, damage, actualDamage: actual, hpAfter: unit.hp });
     }
     const deaths = [];
-    this.removeDead("combat", deaths);
+    this.removeDead("combat", deaths, "main");
 
     // ---- 階段 2：★★劍 斬入 ＋ 追擊 ----
     const cleaves = this.resolveCleaves(deaths, applyDamage, rawSources, hpBefore);
-    if (cleaves.length) this.removeDead("combat", deaths);
+    if (cleaves.length) this.removeDead("combat", deaths, "cleave");
 
     // ---- 階段 3：★★盾 100% 反震（不再觸發反震、不再觸發護衛）----
     const reflections = [];
     // ★★盾即使因本次主戰鬥陣亡，已記錄的實際承傷仍照常反震（不丟棄 ledger）。
+    const damagePositionByUnit = new Map(damageResults.map(item => [item.unitId, { r: item.r, c: item.c }]));
     for (const [shieldId, sources] of reflectLedger) {
       for (const [srcId, value] of sources) {
         const pos = this.findUnitById(srcId);
@@ -532,10 +604,14 @@ class GameEngine {
         const damage = Math.round(value);
         if (damage <= 0) continue;
         attacker.hp -= damage;
-        reflections.push({ shieldId, r: pos[0], c: pos[1], unitId: srcId, damage, hpAfter: attacker.hp });
+        reflections.push({
+          shieldId,
+          from: damagePositionByUnit.get(shieldId) || null,
+          r: pos[0], c: pos[1], unitId: srcId, damage, hpAfter: attacker.hp,
+        });
       }
     }
-    if (reflections.length) this.removeDead("combat", deaths);
+    if (reflections.length) this.removeDead("combat", deaths, "reflection");
 
     const result = {
       packets,
@@ -589,7 +665,10 @@ class GameEngine {
         const foe = inBounds(rr, cc) && this.board[rr][cc];
         if (foe && foe.pid !== sword.pid) foes.push([rr, cc, foe]);
       }
-      const entry = { unitId: sword.id, pid: sword.pid, from: { r: sr, c: sc }, to: { r: dest[0], c: dest[1] }, followUp: null };
+      const entry = {
+        unitId: sword.id, pid: sword.pid, type: sword.type, rank: sword.rank,
+        from: { r: sr, c: sc }, to: { r: dest[0], c: dest[1] }, followUp: null,
+      };
       if (foes.length) {
         foes.sort((a, b) => a[2].hp - b[2].hp);     // HP 最低優先，同 HP 用固定方向順序
         const [tr, tc, target] = foes[0];
@@ -606,11 +685,11 @@ class GameEngine {
     return log;
   }
 
-  removeDead(cause, deaths) {
+  removeDead(cause, deaths, phase = cause) {
     for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
       const unit = this.board[r][c];
       if (!unit || unit.hp > 0) continue;
-      const death = { cause, r, c, unit: { ...unit } };
+      const death = { cause, phase, r, c, unit: { ...unit } };
       deaths.push(death);
       for (let i = 0; i < unit.cards; i++) {
         this.players[unit.pid - 1].cooldown.push({ type: unit.type, turns: 3 });
@@ -682,7 +761,7 @@ class GameEngine {
     return lines;
   }
 
-  finishDeployment() {
+  finishTurn() {
     let result = this.advanceAfterAction();
     // 沒牌可放、又沒有任何合法移動的一方只能跳過。這個迴圈一定會停：
     // 要嘛有交戰（單位陣亡 → 牌經冷卻回流），要嘛雙方連續零交戰而
@@ -695,6 +774,11 @@ class GameEngine {
     return result;
   }
 
+  // 保留給既有平衡腳本的相容入口；正式流程一律呼叫 endTurn()。
+  finishDeployment() {
+    return this.finishTurn();
+  }
+
   advanceAfterAction() {
     this.actionsThisRound++;
     // A normal action consumes its server-issued turn ticket immediately. This
@@ -705,6 +789,7 @@ class GameEngine {
       this.artilleryUsedThisTurn = false;
       this.deploymentCommitted = false;
       this.ownerTurnStart(this.current);
+      this.beginTurnClock();
       this.addLog("sys", `第 ${this.roundNo} 輪換 P${this.current} 行動。`);
       return { roundResolved: false };
     }
@@ -721,7 +806,10 @@ class GameEngine {
       this.gameOver = true;
       this.winner = "double_loss";
       this.endReason = "passivity_forfeit";
-      this.endedAt = new Date().toISOString();
+      this.endedAt = new Date(this.now()).toISOString();
+      this.turnDeadline = null;
+      this.turnClockPausedAt = null;
+      this.turnRemainingMs = 0;
       this.finalFive = { p1: [], p2: [] };
       this.addLog("winner", `雙方連續 ${PASSIVITY_FORFEIT_ROUNDS} 輪未交戰：消極對局，雙方棄賽。`,
         { quietRounds: this.quietRounds });
@@ -743,7 +831,10 @@ class GameEngine {
       this.gameOver = true;
       this.winner = p1Has ? 1 : 2;
       this.endReason = "five_line";
-      this.endedAt = new Date().toISOString();
+      this.endedAt = new Date(this.now()).toISOString();
+      this.turnDeadline = null;
+      this.turnClockPausedAt = null;
+      this.turnRemainingMs = 0;
       this.finalFive = { p1: p1Lines, p2: p2Lines };
       this.addLog("winner", `P${this.winner} 五連獲勝！${this.overtime ? "（加賽）" : ""}`, this.finalFive);
       return { roundResolved: true, gameOver: true, winner: this.winner };
@@ -765,6 +856,7 @@ class GameEngine {
     this.artilleryUsedThisTurn = false;
     this.deploymentCommitted = false;
     this.ownerTurnStart(this.current);
+    this.beginTurnClock();
     this.ensureRoundRecord();
     this.addLog("sys", `第 ${this.roundNo} 輪開始：P${this.current} 先行。`);
     return { roundResolved: true, gameOver: false };
@@ -802,9 +894,64 @@ class GameEngine {
     return { ...MOVE_RULES, skipWhenNoLegalMove: true };
   }
 
+  static timeoutRules() {
+    return { ...TIMEOUT_RULES };
+  }
+
+  // 最近一次戰鬥的純顯示資料。演出只讀引擎已結算的座標、傷害與事件順序，
+  // 不讓前端重新計算互剋、護衛、斬入或反震。
+  lastCombatPresentation() {
+    let record = null;
+    for (let i = this.roundRecords.length - 1; i >= 0; i--) {
+      if (this.roundRecords[i].combat) { record = this.roundRecords[i]; break; }
+    }
+    if (!record) return null;
+    const combat = record.combat;
+    const point = item => ({ r: item.r, c: item.c });
+    const actor = item => ({
+      ...point(item), unitId: item.unitId, pid: item.pid, type: item.type,
+    });
+    return {
+      id: `${this.matchId}:${record.round}`,
+      round: record.round,
+      packets: combat.packets.map(packet => ({
+        from: actor(packet.from),
+        to: actor(packet.to),
+      })),
+      guards: Object.fromEntries(Object.entries(combat.guards || {}).map(([key, guards]) => [
+        key,
+        guards.map(guard => ({ ...point(guard), unitId: guard.unitId })),
+      ])),
+      damage: combat.damage.map(item => ({
+        ...point(item), unitId: item.unitId, pid: item.pid, type: item.type,
+        damage: item.damage, hpAfter: item.hpAfter,
+      })),
+      cleaves: combat.cleaves.map(item => ({
+        unitId: item.unitId, pid: item.pid, type: item.type, rank: item.rank,
+        from: point(item.from), to: point(item.to),
+        followUp: item.followUp ? {
+          ...point(item.followUp), unitId: item.followUp.unitId,
+          damage: item.followUp.damage, hpAfter: item.followUp.hpAfter,
+        } : null,
+      })),
+      reflections: combat.reflections.map(item => ({
+        shieldId: item.shieldId,
+        from: item.from ? point(item.from) : null,
+        ...point(item), unitId: item.unitId, damage: item.damage, hpAfter: item.hpAfter,
+      })),
+      deaths: combat.deaths.map(item => ({
+        cause: item.cause, phase: item.phase, ...point(item),
+        unit: {
+          id: item.unit.id, pid: item.unit.pid, type: item.unit.type, rank: item.unit.rank,
+        },
+      })),
+    };
+  }
+
   visibleStateFor(pid) {
     const own = this.players[pid - 1];
     const opponent = this.players[pid === 1 ? 1 : 0];
+    const turnClock = this.turnClockState();
     return {
       matchId: this.matchId,
       roomCode: this.roomCode,
@@ -834,14 +981,20 @@ class GameEngine {
       unitCatalog: GameEngine.unitCatalog(),
       artilleryRules: GameEngine.artilleryRules(),
       movementRules: GameEngine.movementRules(),
+      timeoutRules: GameEngine.timeoutRules(),
       eliteCardCost: cardCost(2),
       deathCooldownRounds: 3,
       actionsThisRound: this.actionsThisRound,
       artilleryUsedThisTurn: this.artilleryUsedThisTurn,
       deploymentCommitted: this.deploymentCommitted,
+      canAct: !this.gameOver && pid === this.current && !this.deploymentCommitted && this.canAct(pid),
+      turnDeadline: turnClock.deadline,
+      turnClockPaused: turnClock.paused,
+      turnRemainingMs: turnClock.remainingMs,
       gameOver: this.gameOver,
       winner: this.winner,
       endReason: this.endReason,
+      forfeitedPlayer: this.forfeitedPlayer || null,
       overtime: this.overtime,
       overtimeRound: this.overtime ? this.roundNo - this.overtimeStartRound : 0,
       overtimeRules: GameEngine.overtimeRules(),
@@ -849,6 +1002,7 @@ class GameEngine {
       passivityForfeitRounds: PASSIVITY_FORFEIT_ROUNDS,
       logs: this.logs.map(({ index, round, kind, text }) => ({ index, round, kind, text })),
       finalFive: this.gameOver ? this.finalFive : null,
+      lastCombat: this.lastCombatPresentation(),
     };
   }
 
@@ -866,6 +1020,7 @@ class GameEngine {
         turnOrderMode: this.turnOrderMode,
       unitCatalog: GameEngine.unitCatalog(),
       artilleryRules: GameEngine.artilleryRules(),
+      timeoutRules: GameEngine.timeoutRules(),
       eliteCardCost: cardCost(2),
       deathCooldownRounds: 3,
         deck: { sword: 9, shield: 9, spear: 7 },
@@ -892,6 +1047,7 @@ class GameEngine {
       finalFive: this.finalFive || { p1: [], p2: [] },
       winner: this.winner,
       endReason: this.endReason,
+      forfeitedPlayer: this.forfeitedPlayer,
       finalRound: this.roundNo,
       combatResolutionCount: this.combatResolutionCount,
       remainingArtillery: { P1: this.players[0].artillery, P2: this.players[1].artillery },
@@ -903,6 +1059,6 @@ class GameEngine {
   }
 }
 
-const FiveLineEngine = { GameEngine, TYPES, DECK_TEMPLATE, baseStats, cardCost, ALPHA_TURN_ORDER, OVERTIME_RULES, PASSIVITY_FORFEIT_ROUNDS, MOVE_RULES };
+const FiveLineEngine = { GameEngine, TYPES, DECK_TEMPLATE, baseStats, cardCost, ALPHA_TURN_ORDER, OVERTIME_RULES, PASSIVITY_FORFEIT_ROUNDS, MOVE_RULES, TIMEOUT_RULES };
 if (typeof module !== "undefined" && module.exports) module.exports = FiveLineEngine;
 if (typeof globalThis !== "undefined") globalThis.FiveLineEngine = FiveLineEngine;

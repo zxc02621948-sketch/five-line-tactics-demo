@@ -25,6 +25,23 @@
   .btn:hover{background:#30394a}
   .btn.active{outline:2px solid var(--warn)}
   .btn.danger{border-color:#8c2e2e}
+  .turnLine{min-width:0;display:flex;align-items:center;gap:8px}
+  .turnLine .turn{flex:1}
+  .turnTimer{
+    flex:0 0 auto;min-width:42px;color:var(--muted);font-size:13px;font-weight:800;
+    font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap
+  }
+  .turnTimer.urgent{color:var(--danger);text-shadow:0 0 12px rgba(255,89,100,.5)}
+  @keyframes endTurnPulse{
+    0%,100%{box-shadow:0 0 0 0 rgba(255,212,59,.26)}
+    50%{box-shadow:0 0 0 5px rgba(255,212,59,0),0 0 18px rgba(255,212,59,.52)}
+  }
+  .endTurnBtn.ready:not(:disabled){
+    border-color:var(--warn);background:#5b4913;color:#fff4bd;font-weight:800;
+    animation:endTurnPulse 1.15s ease-in-out infinite
+  }
+  .turnSection.turn-ready{border-color:rgba(255,212,59,.92)!important}
+  @media (prefers-reduced-motion:reduce){.endTurnBtn.ready:not(:disabled){animation:none}}
   .layout{
     min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(310px,24vw);
     gap:12px;overflow:hidden;
@@ -127,3 +144,253 @@
     .side{padding:7px}
     .card{flex-basis:58px}
   }
+
+/* ---- 2026-09-09：古戰場沙盤視覺與操作層第一批 ----
+   只改顯示，不改任何引擎數值、勝負、回合或炮擊規則。 */
+:root{
+  --war-ink:#101314;
+  --war-panel:#1a1b1a;
+  --war-panel-2:#24231f;
+  --war-line:#5d5548;
+  --war-sand:#8b7657;
+  --war-sand-dark:#67563f;
+  --war-gold:#d9b96d;
+  --war-p1:#b84b45;
+  --war-p2:#3f7198;
+  --war-text:#f1eadc;
+}
+
+body{
+  background:
+    radial-gradient(circle at 18% 12%,rgba(132,103,62,.16),transparent 32%),
+    radial-gradient(circle at 84% 88%,rgba(85,66,42,.18),transparent 36%),
+    linear-gradient(145deg,#0b0e10 0%,#121514 45%,#0b0d0e 100%);
+}
+
+body .boardWrap{
+  border-color:#4d4538;
+  background:
+    linear-gradient(135deg,rgba(255,255,255,.025),transparent 28%),
+    linear-gradient(145deg,#2a261f,#171714 72%);
+  box-shadow:
+    inset 0 0 0 1px rgba(217,185,109,.06),
+    0 16px 36px rgba(0,0,0,.34);
+}
+
+body .board{
+  border:clamp(3px,.45vw,6px) solid #534936 !important;
+  outline:1px solid rgba(217,185,109,.34);
+  outline-offset:2px;
+  background:#6d5b42 !important;
+  box-shadow:
+    inset 0 0 30px rgba(30,22,14,.5),
+    0 7px 22px rgba(0,0,0,.36);
+}
+
+body .cell{
+  border-color:rgba(59,46,31,.55) !important;
+  background:
+    linear-gradient(135deg,rgba(255,255,255,.028),transparent 55%),
+    linear-gradient(145deg,#8d795b,#806d52 48%,#756247) !important;
+}
+body .cell:nth-child(even){
+  background:
+    linear-gradient(315deg,rgba(255,255,255,.025),transparent 50%),
+    linear-gradient(145deg,#887557,#7a674d 48%,#715e45) !important;
+}
+body .cell:hover{
+  background:
+    linear-gradient(rgba(217,185,109,.16),rgba(217,185,109,.16)),
+    linear-gradient(145deg,#9a8462,#7d694d) !important;
+  box-shadow:inset 0 0 0 2px rgba(238,208,133,.44);
+}
+
+body .unit{
+  width:76%;
+  height:76%;
+  border-radius:42% 42% 46% 46%;
+  border-width:clamp(2px,.3vw,4px) !important;
+  box-shadow:
+    inset 0 0 0 2px rgba(255,255,255,.06),
+    inset 0 -8px 14px rgba(0,0,0,.22),
+    0 4px 9px rgba(0,0,0,.4) !important;
+}
+body .unit.p1{
+  --unit-glyph:#ffe1c2;
+  border-color:#e27a68 !important;
+  background:linear-gradient(145deg,#8b3937,#5d2728) !important;
+}
+body .unit.p2{
+  --unit-glyph:#dceeff;
+  border-color:#77a9ce !important;
+  background:linear-gradient(145deg,#315f80,#1e435f) !important;
+}
+
+/* 棋盤棋子改用同一套 CSS 向量輪廓，避免系統 emoji 在不同裝置長得不同。 */
+body .unit .unitIcon{
+  width:48%;
+  height:48%;
+  top:46%;
+  font-size:0 !important;
+  color:transparent;
+}
+body .unit .unitIcon::before{
+  content:"";
+  display:block;
+  width:100%;
+  height:100%;
+  background:var(--unit-glyph,#f5e8cf);
+  filter:drop-shadow(0 1px 1px rgba(0,0,0,.5));
+  -webkit-mask:var(--unit-mask) center/contain no-repeat;
+  mask:var(--unit-mask) center/contain no-repeat;
+}
+body .unit[title*=" 劍 "]{
+  --unit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath fill='black' d='M43 5l16 16-5 5-4-4-18 18 5 5-4 4-7-7-8 8 4 4-5 5-12-12 5-5 4 4 8-8-7-7 4-4 5 5 18-18-4-4 5-5z'/%3E%3C/svg%3E");
+}
+body .unit[title*=" 盾 "]{
+  --unit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath fill='black' d='M32 4l23 8v17c0 16-9 25-23 31C18 54 9 45 9 29V12l23-8zm0 8l-15 5v12c0 11 5 18 15 23V12z'/%3E%3C/svg%3E");
+}
+body .unit[title*=" 槍 "]{
+  --unit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath fill='black' d='M47 3l14 14-10 3-8 8 5 5-5 5-5-5-22 22-7-7 22-22-5-5 5-5 5 5 8-8 3-10zM8 50l6 6-8 5-3-3 5-8z'/%3E%3C/svg%3E");
+}
+
+body .unit .stars{
+  top:3%;
+  color:#f5cf72;
+  text-shadow:0 1px 2px #000,0 0 7px rgba(245,207,114,.42);
+}
+body .unit:has(.stars:not(:empty)){}
+body .unit small{
+  bottom:12% !important;
+  padding:0 !important;
+  background:transparent !important;
+  color:#fff8e8 !important;
+  text-shadow:0 1px 2px #000,0 0 3px #000;
+}
+body .unit .hpbar{
+  left:10%;right:10%;bottom:4%;
+  height:clamp(3px,.34vw,5px);
+  border:1px solid rgba(0,0,0,.35);
+  background:#3b211b;
+}
+body .unit .hpbar i{
+  background:linear-gradient(90deg,#7bb760,#b6d36d);
+}
+
+/* 手牌與操作按鈕：狀態比裝飾優先，選取、可用、停用一眼可分。 */
+body .handPanel,
+body .section,
+body .playerBand{
+  border-color:#3e3a32;
+  background:linear-gradient(145deg,rgba(35,34,30,.98),rgba(22,23,22,.98));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.025);
+}
+body .card{
+  border-color:#50493d;
+  background:
+    linear-gradient(180deg,rgba(217,185,109,.055),transparent 34%),
+    linear-gradient(145deg,#2c2b27,#20211f);
+  box-shadow:0 3px 9px rgba(0,0,0,.22);
+  transition:border-color .12s ease,transform .12s ease,box-shadow .12s ease;
+}
+body .card:hover:not(:disabled){
+  transform:translateY(-2px);
+  border-color:#8b7958;
+}
+body .card.sel{
+  outline:2px solid #e1bd68 !important;
+  outline-offset:-1px;
+  border-color:#f0d38c !important;
+  box-shadow:0 0 0 2px rgba(217,185,109,.12),0 7px 18px rgba(0,0,0,.32);
+}
+body .card:disabled,
+body .btn:disabled{
+  opacity:.42;
+  filter:saturate(.45);
+  cursor:not-allowed;
+}
+body .card .ico{
+  filter:grayscale(.65) sepia(.3) saturate(.9);
+}
+body .cardTag{
+  border-color:#5b503f;
+  background:#312e27;
+  color:#ddd0b6;
+}
+body .cardStats,
+body .meta,
+body .handHint{color:#aaa08f;}
+
+body .btn{
+  border-color:#514a3e;
+  background:linear-gradient(#302f2a,#252622);
+  color:#ede4d3;
+}
+body .btn:hover:not(:disabled){
+  border-color:#77694f;
+  background:linear-gradient(#3b3932,#2c2c27);
+}
+body .btn.active{
+  outline:2px solid #d9b96d;
+  border-color:#d9b96d;
+}
+body .artBtn.ready:not(:disabled){
+  border-color:#b79a55;
+  color:#f3d98e;
+  background:linear-gradient(#40381f,#2f2b1e);
+}
+body .endTurnBtn.ready:not(:disabled){
+  border-color:#e0bd64;
+  background:linear-gradient(145deg,#6a5420,#4f3f19);
+  color:#fff0b3;
+}
+
+/* 輪到誰除了顏色，也用外框與符號層級表達。 */
+body .turnSection.active-p1,
+body .selfBand.active-p1{
+  box-shadow:inset 4px 0 0 var(--war-p1),inset 0 1px 0 rgba(255,255,255,.03),0 0 0 1px rgba(184,75,69,.18);
+}
+body .turnSection.active-p2,
+body .selfBand.active-p2{
+  box-shadow:inset 4px 0 0 var(--war-p2),inset 0 1px 0 rgba(255,255,255,.03),0 0 0 1px rgba(63,113,152,.18);
+}
+body .handPanel.inactive-turn{
+  opacity:.68;
+  filter:saturate(.6);
+}
+body .phaseBadge{
+  color:#d9c89f;
+  letter-spacing:.03em;
+}
+
+body .cardDetail,
+body .overlayBox,
+body .matchMenuPanel,
+body .logDrawerPanel{
+  border-color:#4d4639;
+  background:linear-gradient(145deg,#23231f,#171916);
+  color:#eee5d5;
+}
+body .cardDetail .detailAbility b,
+body .rulesBody h3{color:#e1bd68;}
+
+/* 手機：主要操作至少 44px，棋盤仍優先使用可用寬度。 */
+@media(max-width:720px){
+  body .btn,
+  body .turnActions .btn,
+  body .rankRow .btn,
+  body .matchMenuSummary{
+    min-height:44px;
+  }
+  body .card{
+    min-width:72px;
+    min-height:104px;
+    padding:7px 5px;
+  }
+  body .card .ico{font-size:25px;}
+  body .boardWrap{padding:7px;}
+}
+
+@media(prefers-reduced-motion:reduce){
+  body .card{transition:none;}
+}

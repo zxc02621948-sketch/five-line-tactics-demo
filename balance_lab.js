@@ -173,28 +173,42 @@ function playGame(seed, styles) {
   while (!engine.gameOver && actions < 300) {
     const pid = engine.current;
     const style = styles[pid - 1];
-    if (!engine.players[pid - 1].hand.length || !engine.hasEmptyCell()) {
+    if (!engine.canAct(pid)) {
       simulationError = "non_terminal_no_action";
       break;
     }
     maybeArtillery(engine, pid, style);
-    const cell = chooseCell(engine, pid, aiRng);
-    const type = cell && chooseType(engine, pid, cell[0], cell[1], style, aiRng);
-    if (!cell || !type) {
-      simulationError = "ai_no_choice";
-      break;
-    }
-    const rank = chooseRank(engine, pid, type, style, aiRng);
-    let result = engine.deploy(pid, {
-      r: cell[0], c: cell[1], type, rank, turnId: engine.turnId,
-    });
-    if (!result.ok && rank === 2) {
+    let result;
+    if (engine.canDeploy(pid)) {
+      const cell = chooseCell(engine, pid, aiRng);
+      const type = cell && chooseType(engine, pid, cell[0], cell[1], style, aiRng);
+      if (!cell || !type) {
+        simulationError = "ai_no_choice";
+        break;
+      }
+      const rank = chooseRank(engine, pid, type, style, aiRng);
       result = engine.deploy(pid, {
-        r: cell[0], c: cell[1], type, rank: 1, turnId: engine.turnId,
+        r: cell[0], c: cell[1], type, rank, turnId: engine.turnId,
+      });
+      if (!result.ok && rank === 2) {
+        result = engine.deploy(pid, {
+          r: cell[0], c: cell[1], type, rank: 1, turnId: engine.turnId,
+        });
+      }
+    } else {
+      const moves = engine.legalMoves(pid);
+      const move = moves[aiRng(moves.length)];
+      result = engine.move(pid, {
+        r: move.from[0], c: move.from[1], toR: move.to[0], toC: move.to[1], turnId: engine.turnId,
       });
     }
     if (!result.ok) {
-      simulationError = `deploy_rejected:${result.error}`;
+      simulationError = `primary_action_rejected:${result.error}`;
+      break;
+    }
+    const ended = engine.endTurn(pid, { turnId: engine.turnId });
+    if (!ended.ok) {
+      simulationError = `end_turn_rejected:${ended.error}`;
       break;
     }
     actions++;
@@ -285,7 +299,8 @@ const report = {
     unit_catalog: GameEngine.unitCatalog(),
     artillery: GameEngine.artilleryRules(),
     overtime: GameEngine.overtimeRules(),
-    no_legal_deployment: GameEngine.terminalRules(),
+    no_legal_deployment: GameEngine.movementRules(),
+    timeouts: GameEngine.timeoutRules(),
     rank3: "disabled",
   },
   baseline_balanced_vs_balanced: summarize(baselineRows),

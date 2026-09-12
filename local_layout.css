@@ -1,8 +1,9 @@
-/* 單機測試固定槽位版面。
-   動態內容只能在自己的槽位內捲動／截斷，不參與外層尺寸計算。 */
+/* 單機與連線共用的牌架／棋子尺寸，以及單機專屬戰場版面。
+   單機桌機版改成和連線對戰相同的閱讀順序：棋盤 → 指揮帶 → 手牌。
+   動態內容只在固定槽位內捲動，不因文字出現／消失造成版面跳動。 */
 :root {
-  --local-gap: 12px;
-  --local-side: clamp(330px, 21vw, 390px);
+  --local-gap: 10px;
+  --local-command-height: 94px;
   --local-hand-height: 148px;
 }
 
@@ -11,13 +12,14 @@ body {
   overflow: hidden;
 }
 
-.app {
+/* ---------- 單機頂部與主戰場 ---------- */
+body > .app {
   padding: 10px 12px 12px;
   grid-template-rows: 54px minmax(0, 1fr);
   gap: 10px;
 }
 
-.top {
+body > .app > .top {
   min-height: 0;
   height: 54px;
   padding: 0;
@@ -26,30 +28,49 @@ body {
   scrollbar-width: thin;
 }
 
-.top > * {
+body > .app > .top > * {
   flex: 0 0 auto;
 }
 
-.top h1 {
+body > .app > .top h1 {
   font-size: clamp(20px, 1.45vw, 27px);
 }
 
-.layout {
-  grid-template-columns: minmax(0, 1fr) var(--local-side);
-  gap: var(--local-gap);
-}
-
-/* 桌機版：棋盤、底部牌架、戰況是三個互不推擠的固定槽位。
-   手牌採戰術卡牌遊戲常見的水平 action bar，而不是設定選單式的直排卡片。 */
-.gameCol {
+/* .gameCol 使用 contents，讓 board / hand 直接成為 .layout 的格子。
+   這樣單機可以和連線一樣把「指揮帶」放在棋盤與牌架之間，不需要改 HTML。 */
+body > .app > .layout {
+  min-height: 0;
+  display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) var(--local-hand-height);
+  grid-template-rows: minmax(0, 1fr) var(--local-command-height) var(--local-hand-height);
   gap: var(--local-gap);
+  overflow: hidden;
 }
 
-.boardWrap {
+body > .app > .layout > .gameCol {
+  display: contents;
+}
+
+body > .app .boardWrap {
+  grid-row: 1;
+  min-height: 0;
   padding: 10px;
   overflow: hidden;
+}
+
+body > .app .side {
+  grid-row: 2;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  display: block;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+}
+
+body > .app .handPanel {
+  grid-row: 3;
 }
 
 .board {
@@ -61,7 +82,7 @@ body {
   overflow: hidden;
 }
 
-/* 棋子放大，但星級、圖示、HP、血條仍全部鎖在單格內。 */
+/* ---------- 棋子：單機、連線共用 ---------- */
 .unit,
 .unit.p1,
 .unit.p2 {
@@ -108,8 +129,9 @@ body {
   bottom: 4%;
 }
 
-/* 底部指令牌架：左狀態／中央五張牌／右升階，三段永遠固定。 */
+/* ---------- 共用底部牌架 ---------- */
 .handPanel {
+  position: relative;
   height: var(--local-hand-height);
   min-height: 0;
   margin: 0;
@@ -118,8 +140,6 @@ body {
   grid-template-columns: clamp(174px, 14vw, 220px) minmax(0, 1fr) clamp(190px, 16vw, 250px);
   grid-template-rows: minmax(0, 1fr);
   gap: 12px;
-  /* 不可用 overflow:hidden：兵種大卡是往上浮出面板外的，會被整個裁掉。
-     需要裁切的是牌列本身，交給 .hand 的水平捲動處理。 */
   overflow: visible;
 }
 
@@ -129,7 +149,7 @@ body {
   grid-template-rows: 30px 24px minmax(0, 1fr);
   align-content: center;
   padding: 8px 10px;
-  border-right: 1px solid #2b3443;
+  border-right: 1px solid #4e493f;
   overflow: hidden;
 }
 
@@ -167,20 +187,20 @@ body {
   min-height: 126px;
   padding: 6px 7px;
   border-width: 1px;
-  background: linear-gradient(180deg, #273142 0%, #1d2430 100%);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 5px 14px rgba(0,0,0,.18);
+  background: linear-gradient(180deg, #2c2b27 0%, #1e211f 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 5px 14px rgba(0,0,0,.22);
 }
 
 .card:hover:not(:disabled) {
-  background: linear-gradient(180deg, #303c50 0%, #222b39 100%);
-  border-color: #71809a;
+  background: linear-gradient(180deg, #37352f 0%, #252824 100%);
+  border-color: #88795b;
 }
 
 .card.sel {
-  outline: 2px solid var(--warn);
+  outline: 2px solid var(--war-gold, var(--warn));
   outline-offset: -2px;
-  border-color: #ffe066;
-  background: linear-gradient(180deg, #394253 0%, #252d3a 100%);
+  border-color: #e9ca7b;
+  background: linear-gradient(180deg, #443e31 0%, #2c2b26 100%);
 }
 
 .card .ico {
@@ -206,66 +226,178 @@ body {
   align-content: center;
   gap: 7px;
   overflow-y: auto;
-  border-left: 1px solid #2b3443;
+  border-left: 1px solid #4e493f;
 }
 
 .rankRow:empty::before {
   content: "選擇手牌後\A在此設定星級";
-  color: #7e8a9b;
+  color: #8f8777;
   font-size: 12px;
   line-height: 1.6;
   white-space: pre-line;
   align-self: center;
 }
 
-/* 大卡從手牌欄內側展開，固定尺寸，不改變任何面板位置。 */
 .cardDetail {
   left: clamp(186px, 15vw, 232px);
   right: auto;
   bottom: calc(100% + 10px);
-  width: min(420px, calc(100vw - var(--local-side) - 280px));
+  width: min(420px, calc(100vw - 300px));
   height: 310px;
 }
 
-/* 戰況側欄使用固定三列；文字增加時只在各自區塊內捲動。 */
-.side {
-  padding: 10px;
-  display: grid;
-  grid-template-rows: 282px 112px minmax(0, 1fr);
-  gap: 9px;
-  overflow: hidden;
-}
-
-.section {
+/* ---------- 單機橫向指揮帶 ---------- */
+body > .app .side > .turnSection {
+  width: 100%;
+  height: var(--local-command-height);
   min-height: 0;
-  overflow: hidden;
-}
-
-.section h3 {
-  height: 20px;
-  margin: 0 0 8px;
-}
-
-.turnSection {
-  display: grid;
-  /* 多一列 22px 給加賽／消極警示條。這一列永遠存在，沒有警示時是空的，
-     不會因為出現或消失而把下面的東西擠上擠下。 */
-  grid-template-rows: 20px 28px 22px 42px 40px 47px minmax(0, 1fr);
-  gap: 6px;
-}
-
-.turnSection h3 {
   margin: 0;
+  padding: 9px 11px;
+  display: grid;
+  grid-template-columns:
+    minmax(135px, .75fr)
+    minmax(220px, 1.35fr)
+    minmax(150px, .8fr)
+    minmax(140px, .75fr)
+    minmax(160px, .85fr);
+  grid-template-rows: 28px 38px;
+  align-items: stretch;
+  gap: 7px 10px;
+  overflow: hidden;
+  border: 1px solid #3d3a33;
+  border-radius: 13px;
+  background: linear-gradient(145deg, rgba(35,34,30,.97), rgba(23,24,22,.98));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 8px 22px rgba(0,0,0,.22);
+  transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease;
 }
 
-.turn {
+body > .app .turnSection h3 {
+  grid-column: 1;
+  grid-row: 1;
+  height: auto;
+  margin: 0;
+  align-self: center;
+  color: #b9ad96;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .14em;
+}
+
+body > .app .turnSection .turnLine {
+  grid-column: 1;
+  grid-row: 2;
+  min-width: 0;
+}
+
+body > .app .turnSection .turn {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: clamp(18px, 1.35vw, 23px);
+  line-height: 28px;
+  letter-spacing: .01em;
 }
 
-/* 警示條：固定佔位，靠 level class 上色。空字串時完全透明。 */
+body > .app .turnSection .phaseBadge {
+  grid-column: 2;
+  grid-row: 1;
+  height: 28px;
+}
+
+body > .app .turnSection .actionStatus {
+  grid-column: 2;
+  grid-row: 2;
+  min-height: 0;
+  height: 38px;
+  overflow: auto;
+}
+
+body > .app .turnSection .artilleryStatus {
+  grid-column: 3;
+  grid-row: 1 / 3;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  overflow: hidden;
+}
+
+body > .app .turnSection .artBtn {
+  grid-column: 4;
+  grid-row: 1 / 3;
+  min-height: 0;
+  margin: 0;
+  white-space: normal;
+  line-height: 1.25;
+}
+
+body > .app .turnSection .endTurnBtn {
+  grid-column: 5;
+  grid-row: 1 / 3;
+  min-height: 0;
+  margin: 0;
+  white-space: normal;
+  line-height: 1.25;
+}
+
+/* 桌機主畫面不再常駐一整塊「戰況說明」；滑鼠戰術檢視與狀態列已能提供即時資訊。
+   完整規則仍可由「？ 規則」開啟。 */
+body > .app .turnSection .note,
+body > .app .previewSection {
+  display: none;
+}
+
+body > .app .turnSection.active-p1 {
+  border-color: rgba(226, 122, 104, .9);
+  box-shadow: inset 0 0 0 1px rgba(184,75,69,.18), 0 0 22px rgba(184,75,69,.18);
+  background: linear-gradient(135deg, rgba(139,57,55,.20), rgba(23,24,22,.98) 46%);
+}
+
+body > .app .turnSection.active-p2 {
+  border-color: rgba(119, 169, 206, .9);
+  box-shadow: inset 0 0 0 1px rgba(63,113,152,.2), 0 0 22px rgba(63,113,152,.18);
+  background: linear-gradient(135deg, rgba(49,95,128,.22), rgba(23,24,22,.98) 46%);
+}
+
+.turn.p1t {
+  color: var(--p1);
+  text-shadow: 0 0 16px rgba(255, 107, 107, .42);
+}
+
+.turn.p2t {
+  color: var(--p2);
+  text-shadow: 0 0 16px rgba(77, 171, 247, .42);
+}
+
+.board.active-p1 {
+  border-color: var(--p1);
+  box-shadow: 0 0 0 2px rgba(255, 107, 107, .24), 0 16px 42px rgba(0, 0, 0, .24), 0 0 24px rgba(255, 107, 107, .18);
+}
+
+.board.active-p2 {
+  border-color: var(--p2);
+  box-shadow: 0 0 0 2px rgba(77, 171, 247, .24), 0 16px 42px rgba(0, 0, 0, .24), 0 0 24px rgba(77, 171, 247, .18);
+}
+
+.handPanel.inactive-turn .hand,
+.handPanel.inactive-turn .rankRow {
+  opacity: .38;
+  filter: saturate(.55);
+}
+
+.hand,
+.rankRow {
+  transition: opacity .18s ease, filter .18s ease;
+}
+
+.btn:disabled,
+.card:disabled {
+  cursor: not-allowed;
+  opacity: .52;
+}
+
 .phaseBadge {
   min-width: 0;
   display: flex;
@@ -281,9 +413,21 @@ body {
   background: transparent;
   color: transparent;
 }
-.phaseBadge.info   { background: rgba(77, 171, 247, .16); color: var(--p2); }
-.phaseBadge.warn   { background: rgba(255, 212, 59, .16); color: var(--warn); }
-.phaseBadge.danger { background: rgba(255, 59, 48, .20);  color: var(--danger); }
+
+.phaseBadge.info {
+  background: rgba(77, 171, 247, .16);
+  color: var(--p2);
+}
+
+.phaseBadge.warn {
+  background: rgba(255, 212, 59, .16);
+  color: var(--warn);
+}
+
+.phaseBadge.danger {
+  background: rgba(255, 59, 48, .20);
+  color: var(--danger);
+}
 
 .status {
   min-height: 0;
@@ -292,40 +436,50 @@ body {
   white-space: pre-wrap;
 }
 
-.actionStatus,
-.artilleryStatus,
-.artBtn {
-  margin-top: 0;
-}
-
-.turnSection .note {
-  margin: 0;
-  min-height: 0;
-  overflow: auto;
-}
-
-.previewSection,
-.logSection {
-  display: grid;
-  grid-template-rows: 20px minmax(0, 1fr);
-}
-
-.previewSection .combatPreview {
-  min-height: 0;
-  overflow: auto;
-}
-
-.logSection .log {
-  height: auto;
-  min-height: 0;
-  overflow: auto;
-  scrollbar-gutter: stable;
-}
-
-/* 中等寬度：保持固定槽位，手牌移到底部以保住棋盤可用寬度。 */
-@media (max-width: 1180px) {
+/* ---------- 中等寬度 ---------- */
+@media (max-width: 1180px) and (min-width: 901px) {
   :root {
-    --local-side: clamp(310px, 30vw, 350px);
+    --local-command-height: 126px;
+  }
+
+  body > .app > .layout {
+    grid-template-rows: minmax(0, 1fr) var(--local-command-height) var(--local-hand-height);
+  }
+
+  body > .app .turnSection {
+    grid-template-columns: minmax(135px, .7fr) minmax(230px, 1.3fr) minmax(150px, .8fr) minmax(150px, .8fr);
+    grid-template-rows: 28px 38px 38px;
+  }
+
+  body > .app .turnSection h3,
+  body > .app .turnSection .turnLine {
+    grid-column: 1;
+  }
+
+  body > .app .turnSection .phaseBadge {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  body > .app .turnSection .actionStatus {
+    grid-column: 2;
+    grid-row: 2 / 4;
+    height: auto;
+  }
+
+  body > .app .turnSection .artilleryStatus {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  body > .app .turnSection .artBtn {
+    grid-column: 3;
+    grid-row: 2 / 4;
+  }
+
+  body > .app .turnSection .endTurnBtn {
+    grid-column: 4;
+    grid-row: 1 / 4;
   }
 
   .handPanel {
@@ -334,8 +488,7 @@ body {
   }
 
   .handHeader {
-    grid-template-columns: minmax(0,1fr);
-    grid-template-rows: 30px 22px minmax(0,1fr);
+    grid-template-rows: 30px 22px minmax(0, 1fr);
     padding: 6px 8px;
   }
 
@@ -346,26 +499,32 @@ body {
     min-height: 126px;
   }
 
-  .card .ico { font-size: 25px; }
-  .cardStats { font-size: 9px; line-height: 1.32; }
+  .card .ico {
+    font-size: 25px;
+  }
+
+  .cardStats {
+    font-size: 9px;
+    line-height: 1.32;
+  }
 
   .rankRow {
-    height: auto;
     padding: 8px 0 8px 8px;
     overflow-x: hidden;
     overflow-y: auto;
   }
 
-  .rankRow .btn { padding: 6px 8px; }
+  .rankRow .btn {
+    padding: 6px 8px;
+  }
 
   .cardDetail {
     left: 12px;
-    bottom: calc(100% + 10px);
-    width: min(420px, calc(100vw - var(--local-side) - 52px));
+    width: min(420px, calc(100vw - 52px));
   }
 }
 
-/* 窄視窗使用固定順序的單欄；區塊自身尺寸固定，整頁只做垂直捲動。 */
+/* ---------- 窄視窗／手機：回到單欄順序 ---------- */
 @media (max-width: 900px) {
   html,
   body {
@@ -373,7 +532,7 @@ body {
     overflow-y: auto;
   }
 
-  .app {
+  body > .app {
     height: auto;
     min-height: 100vh;
     padding: 8px;
@@ -381,23 +540,70 @@ body {
     overflow: visible;
   }
 
-  .top {
+  body > .app > .top {
     height: 54px;
     min-height: 54px;
     flex-wrap: nowrap;
   }
 
-  .layout {
+  body > .app > .layout {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
     gap: 10px;
     overflow: visible;
   }
 
-  .gameCol {
+  body > .app > .layout > .gameCol {
+    display: contents;
+  }
+
+  body > .app .boardWrap {
+    grid-row: 1;
+    height: min(94vw, 72vh);
+    min-height: 0;
+  }
+
+  body > .app .side {
+    grid-row: 2;
+    display: block;
+    height: auto;
+  }
+
+  body > .app .handPanel {
+    grid-row: 3;
+  }
+
+  body > .app .side > .turnSection {
+    height: auto;
+    min-height: 310px;
+    padding: 10px;
     display: grid;
-    grid-template-rows: min(94vw, 72vh) 188px;
-    gap: 10px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 20px 34px 22px 58px 40px 50px 50px;
+    gap: 6px;
+  }
+
+  body > .app .turnSection h3,
+  body > .app .turnSection .turnLine,
+  body > .app .turnSection .phaseBadge,
+  body > .app .turnSection .actionStatus,
+  body > .app .turnSection .artilleryStatus,
+  body > .app .turnSection .artBtn,
+  body > .app .turnSection .endTurnBtn {
+    grid-column: 1;
+  }
+
+  body > .app .turnSection h3 { grid-row: 1; }
+  body > .app .turnSection .turnLine { grid-row: 2; }
+  body > .app .turnSection .phaseBadge { grid-row: 3; }
+  body > .app .turnSection .actionStatus { grid-row: 4; height: auto; }
+  body > .app .turnSection .artilleryStatus { grid-row: 5; }
+  body > .app .turnSection .artBtn { grid-row: 6; }
+  body > .app .turnSection .endTurnBtn { grid-row: 7; }
+
+  body > .app .previewSection {
+    display: none;
   }
 
   .handPanel {
@@ -432,31 +638,28 @@ body {
     min-height: 102px;
   }
 
-  .card .ico { font-size: 22px; }
-  .cardStats { font-size: 9px; line-height: 1.25; }
+  .card .ico {
+    font-size: 22px;
+  }
+
+  .cardStats {
+    font-size: 9px;
+    line-height: 1.25;
+  }
 
   .rankRow {
     height: 34px;
     padding: 3px 0 0;
     display: flex;
     flex-wrap: nowrap;
-    border-top: 1px solid #2b3443;
+    border-top: 1px solid #4e493f;
     border-left: 0;
     overflow-x: auto;
     overflow-y: hidden;
   }
 
-  .rankRow .btn { padding: 5px 8px; }
-
-  .boardWrap {
-    height: auto;
-    min-height: 0;
-  }
-
-  .side {
-    height: 620px;
-    margin: 0;
-    grid-template-rows: 282px 112px minmax(0, 1fr);
+  .rankRow .btn {
+    padding: 5px 8px;
   }
 
   .cardDetail {
@@ -470,12 +673,12 @@ body {
 }
 
 @media (max-width: 560px) {
-  .top h1 {
+  body > .app > .top h1 {
     width: auto;
     font-size: 18px;
   }
 
-  .boardWrap {
+  body > .app .boardWrap {
     padding: 5px;
   }
 

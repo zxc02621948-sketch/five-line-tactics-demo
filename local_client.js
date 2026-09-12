@@ -1,5 +1,5 @@
 // /local 單機測試。規則完全來自正式的 game_engine.js，這裡只做操作與顯示。
-// 兩種模式維持原本用途：對電腦（P2 由簡單啟發式代打）與本機雙人（同一台電腦輪流操作）。
+// 兩種模式維持原本用途：對電腦（P2 由策略 AI 代打）與本機雙人（同一台電腦輪流操作）。
 (() => {
   const FiveLine = globalThis.FiveLineEngine;
   const { GameEngine, ALPHA_TURN_ORDER } = FiveLine;
@@ -20,17 +20,49 @@
   let notice = "";
   let aiThinking = false;
   let resigned = null;                 // 棄賽者的 pid；棄賽只影響本機顯示，不動引擎規則
+  let resultReportOpen = false;
+  let resultOverlayDismissed = false;
+  let lastCombatId = null;
+  let pendingCombat = null;
 
   const catalog = () => GameEngine.unitCatalog();
   const finished = () => Boolean(resigned) || (engine && engine.gameOver);
   // 對局已開始 ＝ 盤面上有棋子。開始後就不該還能自由切換模式。
   const started = () => Boolean(engine) && engine.board.some(row => row.some(Boolean));
-  const humanTurn = () => engine && !finished() && !aiThinking
+  const humanTurn = () => engine && !finished() && !aiThinking && !pendingCombat && !combatPlayback.active()
     && (mode === "pvp" || engine.current === 1);
+  function turnBlockReason() {
+    if (!engine) return "等待遊戲建立";
+    if (finished()) return "本局已結束";
+    if (pendingCombat || combatPlayback.active()) return "戰鬥演出中";
+    if (aiThinking || (mode === "pve" && engine.current === 2)) return "電腦正在行動";
+    return "";
+  }
+  function artilleryReason() {
+    const player = engine?.players?.[engine.current - 1];
+    return UI.artilleryDisabledReason({
+      turnReason: turnBlockReason(),
+      remaining: player?.artillery,
+      usedThisTurn: engine?.artilleryUsedThisTurn,
+    });
+  }
+  function endTurnReason() {
+    return UI.endTurnDisabledReason({
+      turnReason: turnBlockReason(),
+      deploymentCommitted: engine?.deploymentCommitted,
+      canAct: canAct(),
+    });
+  }
+  function placementBlockReason() {
+    return turnBlockReason() || (engine?.deploymentCommitted
+      ? "本回合已完成部署或移動，請炮擊或結束回合"
+      : "");
+  }
   // 手牌用盡時的合法行動由引擎判定（移動一格），這裡只保留操作前的防呆。
   // 能不能行動一律問引擎：手牌用盡時還可以移動一格，兩者皆無時引擎會自動跳過。
   const canAct = () => Boolean(engine) && !finished() && engine.canAct(engine.current);
-  const moveMode = () => Boolean(engine) && !finished() && !engine.canDeploy(engine.current)
+  const moveMode = () => Boolean(engine) && !finished() && !engine.deploymentCommitted
+    && !engine.canDeploy(engine.current)
     && engine.legalMoves(engine.current).length > 0;
 
   function reset() {
@@ -38,6 +70,8 @@
     engine = new GameEngine({ roomCode: "LOCAL1", ...ALPHA_TURN_ORDER });
     selectedType = null; selectedRank = 1; hoverType = null;
     artilleryMode = false; moveFrom = null; notice = ""; aiThinking = false; resigned = null;
+    resultReportOpen = false; resultOverlayDismissed = false;
+    combatPlayback.reset(); lastCombatId = null; pendingCombat = null;
     render();
     scheduleAi();
   }
@@ -45,6 +79,29 @@
   // ---- 顯示 ----
   // 每次重繪都依當下容器重算棋盤尺寸，不倚賴 ResizeObserver 的觸發時機
   const sizeBoard = UI.autoSizeBoard(document.querySelector("#board"), document.querySelector(".boardWrap"));
+  const combatPlayback = UI.createCombatPlayback({
+    boardEl: $("#board"),
+    stageEl: $("#combatStage"),
+    svgEl: $("#combatLayer"),
+    piecesEl: $("#combatPieces"),
+    labelEl: $("#combatStepLabel"),
+    skipButton: $("#skipCombatBtn"),
+    onFinish: () => render(),
+  });
+
+  function syncCombatCue() {
+    const next = engine?.lastCombatPresentation();
+    if (!next || next.id === lastCombatId || next.id === pendingCombat?.id) return;
+    pendingCombat = next;
+  }
+
+  function startPendingCombat() {
+    if (!pendingCombat || combatPlayback.active()) return;
+    const next = pendingCombat;
+    pendingCombat = null;
+    lastCombatId = next.id;
+    if (!combatPlayback.play(next)) renderResultOverlay();
+  }
 
   function renderBoard() {
     sizeBoard();
@@ -53,10 +110,13 @@
     for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
       const cell = document.createElement("div");
       cell.className = "cell";
+      const finalOwner = engine.gameOver ? UI.finalFiveOwner(engine, r, c) : 0;
+      if (finalOwner) cell.classList.add(`final-five-p${finalOwner}`);
       const unit = engine.board[r][c];
       if (unit) {
         const div = document.createElement("div");
         div.className = `unit p${unit.pid}`;
+        div.dataset.unitId = String(unit.id);
         div.innerHTML = UI.unitHtml(unit);
         div.title = UI.unitTitle(unit);
         cell.appendChild(div);
@@ -77,11 +137,13 @@
     const cat = catalog();
     const counts = { sword: 0, shield: 0, spear: 0 };
     player.hand.forEach(type => counts[type]++);
+    const blocked = placementBlockReason();
 
     player.hand.forEach(type => {
       const button = document.createElement("button");
       button.className = `card ${selectedType === type ? "sel" : ""}`;
-      button.disabled = !humanTurn();
+      button.disabled = Boolean(blocked);
+      button.title = blocked;
       button.innerHTML = UI.handCardHtml(type, cat);
       button.onclick = () => { selectedType = type; selectedRank = 1; artilleryMode = false; render(); };
       button.addEventListener("mouseenter", () => { hoverType = type; renderCardDetail(); });
@@ -103,10 +165,13 @@
       for (const [rank, cost] of [[1, 1], [2, 3]]) {
         const button = document.createElement("button");
         const capped = rank === 2 && eliteOut;
+        const reason = UI.rankDisabledReason({ turnReason: blocked, count: counts[selectedType], cost,
+          capped, typeName: NAMES[selectedType] });
         button.className = `btn ${selectedRank === rank ? "active" : ""}`;
-        button.textContent = capped ? `★★（場上已有${NAMES[selectedType]}）` : `${"★".repeat(rank)}（${cost}張）`;
-        button.disabled = !humanTurn() || counts[selectedType] < cost || capped;
-        button.title = capped ? "同兵種★★同時只能有一隻，等它陣亡後才能再合成" : "";
+        button.textContent = capped ? `★★（場上已有${NAMES[selectedType]}）`
+          : reason ? `${"★".repeat(rank)}｜${reason}` : `${"★".repeat(rank)}（${cost}張）`;
+        button.disabled = Boolean(reason);
+        button.title = reason;
         button.onclick = () => { selectedRank = rank; render(); };
         $("#rankRow").appendChild(button);
       }
@@ -127,6 +192,7 @@
     const boardEl = $("#board");
     if (!layer || !boardEl || !engine) return;
     layer.innerHTML = "";
+    if (pendingCombat || combatPlayback.active()) return;
     if (!hoverCell) {                        // 移開瞄準格時要把統計一起清掉
       if (artilleryPlan) { artilleryPlan = null; updateStatusText(); }
       return;
@@ -143,7 +209,7 @@
     if (artilleryPlan) { artilleryPlan = null; updateStatusText(); }
     let ghost = null;
     if (!engine.board[r][c]) {
-      if (!selectedType || !humanTurn()) return;
+      if (!selectedType || !humanTurn() || engine.deploymentCommitted) return;
       const stats = FiveLine.baseStats(selectedType, selectedRank);
       if (!stats) return;
       ghost = { r, c, unit: { id: -1, pid: engine.current, type: selectedType, rank: selectedRank,
@@ -176,12 +242,77 @@
     }
   }
 
+  function renderTurnVisual() {
+    const activePid = engine && !finished() ? Number(engine.current) : 0;
+    const turnSection = document.querySelector(".turnSection");
+    const turnText = $("#turnText");
+    const boardEl = $("#board");
+    for (const pid of [1, 2]) {
+      turnSection?.classList.toggle(`active-p${pid}`, activePid === pid);
+      boardEl.classList.toggle(`active-p${pid}`, activePid === pid);
+    }
+    turnText.className = activePid ? `turn p${activePid}t` : "turn";
+    document.querySelector(".handPanel")?.classList.toggle("inactive-turn",
+      Boolean(engine && !finished()
+        && ((mode === "pve" && engine.current === 2) || engine.deploymentCommitted)));
+    turnSection?.classList.toggle("turn-ready",
+      Boolean(engine && !finished() && engine.deploymentCommitted && !turnBlockReason()));
+  }
+
+  function localReportText() {
+    const artilleryRounds = pid => engine.artilleryEvents
+      .filter(item => item.pid === pid)
+      .map(item => item.round);
+    const cards = pid => engine.cardDistribution(pid);
+    const cardLine = (label, item) => `${label} 牌庫 ${item.deck}／手牌 ${item.hand}`
+      + `／冷卻 ${item.cooldown}／場上綁定 ${item.boardBoundCards}／總數 ${item.total}`
+      + `${item.valid ? "" : " ⚠"}`;
+    return `最終輪數：${engine.roundNo}\n`
+      + `P1 炮擊輪數：${artilleryRounds(1).join("、") || "未使用"}\n`
+      + `P2 炮擊輪數：${artilleryRounds(2).join("、") || "未使用"}\n`
+      + `剩餘炮擊：P1 ${engine.players[0].artillery}／P2 ${engine.players[1].artillery}\n`
+      + `${cardLine("P1 卡片", cards(1))}\n${cardLine("P2 卡片", cards(2))}`;
+  }
+
+  function renderResultOverlay() {
+    const overlay = $("#resultOverlay");
+    if (!finished() || resultOverlayDismissed || pendingCombat || combatPlayback.active()) {
+      overlay.classList.add("hidden");
+      if (!finished()) resultReportOpen = false;
+      return;
+    }
+    const winner = resigned ? 3 - resigned : engine.winner;
+    const box = overlay.querySelector(".resultBox");
+    box.classList.remove("result-p1", "result-p2", "result-neutral");
+    box.classList.add(winner === 1 ? "result-p1" : winner === 2 ? "result-p2" : "result-neutral");
+    $("#resultTitle").textContent = resigned
+      ? `P${winner} 獲勝`
+      : UI.resultLabel(engine);
+    $("#resultReason").textContent = resigned
+      ? `P${resigned} 已棄賽，本局由 P${winner} 獲勝。`
+      : UI.resultReasonLabel(engine);
+    $("#resultRematchBtn").disabled = false;
+    $("#resultRematchBtn").textContent = "再來一局";
+    $("#resultLeaveBtn").disabled = false;
+    $("#resultLeaveBtn").textContent = "返回模式選擇";
+
+    const report = $("#resultReport");
+    const reportButton = $("#resultReportBtn");
+    report.textContent = localReportText();
+    report.classList.toggle("hidden", !resultReportOpen);
+    reportButton.setAttribute("aria-expanded", String(resultReportOpen));
+    reportButton.textContent = resultReportOpen ? "收起戰報" : "看戰報";
+    overlay.classList.remove("hidden");
+  }
+
   function render() {
     if (!engine) return;
-    renderBoard();
+    syncCombatCue();
+    if (!combatPlayback.active()) renderBoard();
     renderHand();
     renderLogs();
     renderForecast();
+    renderTurnVisual();
     const owner = mode === "pve" && engine.current === 2 ? "P2（電腦）" : `P${engine.current}`;
     const winnerLabel = resigned
       ? `P${resigned} 棄賽｜P${3 - resigned} 獲勝`
@@ -200,38 +331,74 @@
     badge.className = `phaseBadge ${phase.level === "none" ? "" : phase.level}`.trim();
     badge.title = phase.full || phase.text; }
     $("#turnText").textContent = finished()
-      ? winnerLabel
-      : `第 ${engine.roundNo} 輪｜${owner} 行動｜${engine.actionsThisRound === 0 ? "先手" : "後手"}`;
+      ? "對局結束"
+      : `輪到 ${owner}｜第 ${engine.roundNo} 輪`;
+    $("#turnText").title = finished() ? winnerLabel
+      : `${owner} ${engine.actionsThisRound === 0 ? "先手" : "後手"}`;
     updateStatusText();
     $("#artilleryOverview").textContent =
       `炮擊資源｜P1：${engine.players[0].artillery} 發｜P2：${engine.players[1].artillery} 發`;
     const artilleryBtn = $("#artilleryBtn");
     const me = engine.players[engine.current - 1];
-    artilleryBtn.textContent = `炮擊（本回合方剩 ${me.artillery} 發）`;
-    artilleryBtn.disabled = !humanTurn() || me.artillery <= 0
-      || engine.artilleryUsedThisTurn || engine.deploymentCommitted;
+    const artilleryBase = `炮擊（本回合方剩 ${me.artillery} 發）`;
+    const disabledReason = artilleryReason();
+    artilleryBtn.textContent = disabledReason ? `${artilleryBase}｜${disabledReason}` : artilleryBase;
+    artilleryBtn.disabled = Boolean(disabledReason);
+    artilleryBtn.title = disabledReason;
     artilleryBtn.className = `btn artBtn ${artilleryMode ? "active" : "ready"}`;
+    const endTurnBtn = $("#endTurnBtn");
+    const endDisabledReason = endTurnReason();
+    endTurnBtn.textContent = endDisabledReason
+      ? `結束回合｜${endDisabledReason}`
+      : "結束回合";
+    endTurnBtn.disabled = Boolean(endDisabledReason);
+    endTurnBtn.title = endDisabledReason;
+    endTurnBtn.className = `btn endTurnBtn ${endDisabledReason ? "" : "ready"}`.trim();
+    updateTurnTimer();
     renderSessionControls();
+    renderResultOverlay();
+    startPendingCombat();
   }
 
   // 狀態文字獨立出來：炮擊瞄準時 renderForecast 會算出命中統計，需要單獨刷新。
   function updateStatusText() {
     const text = finished()
       ? "按「重開」開始新的一局，或切換對戰模式。"
+      : turnBlockReason()
+        ? `操作暫停：${turnBlockReason()}。手牌與炮擊會在可操作時恢復。`
+      : engine.deploymentCommitted
+        ? engine.artilleryUsedThisTurn
+          ? "主要行動與炮擊已完成：請按「結束回合」。"
+          : "主要行動已完成：仍可炮擊，然後按「結束回合」。"
       : moveMode()
         ? (moveFrom
             ? `已選 (${moveFrom[0] + 1},${moveFrom[1] + 1})，點上下左右相鄰的空格移動。`
             : "手牌已用盡：本回合改為移動——點自己的一顆棋，再點相鄰空格。")
       : !canAct()
-        ? "本回合沒有手牌也沒有可移動的棋子，引擎會自動跳過。"
+        ? "目前已無法部署或移動，請按「結束回合」。"
       : artilleryMode ? (artilleryPlan
           ? `炮擊瞄準中：命中敵軍 ${artilleryPlan.enemies}、友軍 ${artilleryPlan.allies}`
             + `｜預計擊殺 ${artilleryPlan.kills}、誤殺友軍 ${artilleryPlan.losses}`
           : "炮擊模式：移到棋盤上可預覽 3×3 範圍與傷害。")
         : selectedType ? `已選 ${"★".repeat(selectedRank)}${NAMES[selectedType]}，點空格部署。`
           : "先點手牌選擇兵種，再點棋盤空格部署。";
-    $("#status").textContent = notice ? `${text}
-${notice}` : text;
+    $("#status").textContent = notice ? `${text}\n${notice}` : text;
+  }
+
+  function updateTurnTimer() {
+    const timer = $("#turnTimer");
+    if (!timer) return;
+    if (!engine || finished()) {
+      timer.textContent = "—";
+      timer.className = "turnTimer";
+      timer.title = "";
+      return;
+    }
+    const clock = engine.turnClockState(Date.now());
+    const total = GameEngine.timeoutRules().turnMs;
+    timer.textContent = `${Math.ceil(clock.remainingMs / 1000)}s`;
+    timer.title = "本回合剩餘時間";
+    timer.className = `turnTimer ${clock.remainingMs <= total / 4 ? "urgent" : ""}`.trim();
   }
 
   // 對局進行中不顯示模式切換與重開，避免誤觸中斷戰鬥；改提供棄賽。
@@ -258,13 +425,17 @@ ${notice}` : text;
     notice = result.ok ? "" : result.error;
     if (result.ok) { selectedType = null; selectedRank = 1; hoverType = null; }
     render();
-    if (result.ok) scheduleAi();
     return result;
   }
 
   function onCell(r, c) {
     if (!humanTurn()) return;
     if (artilleryMode) { artilleryMode = false; act({ kind: "artillery", r, c }); return; }
+    if (engine.deploymentCommitted) {
+      notice = "主要行動已完成；現在仍可炮擊，或按「結束回合」。";
+      render();
+      return;
+    }
     if (moveMode()) {
       const unit = engine.board[r][c];
       if (unit && unit.pid === engine.current) { moveFrom = [r, c]; notice = ""; render(); return; }
@@ -274,14 +445,15 @@ ${notice}` : text;
       notice = result.ok ? "" : result.error;
       if (result.ok) { moveFrom = null; selectedType = null; }
       render();
-      if (result.ok) scheduleAi();
       return;
     }
     if (!selectedType) { notice = "請先選擇手牌"; render(); return; }
     act({ kind: "deploy", r, c, type: selectedType, rank: selectedRank });
   }
 
-  // ---- 對電腦模式的簡單啟發式（只使用引擎的公開介面）----
+  // ---- 對電腦模式：標準策略 AI ----
+  // AI 只讀公開盤面與正式引擎介面。候選部署／移動會交給同一份 resolveCombat() 預演，
+  // 炮擊範圍、傷害、★★成本等數值也全部向引擎取得，不在這裡維護第二份規則。
   function scheduleAi() {
     if (mode !== "pve" || finished() || engine.current !== 2) return;
     aiThinking = true;
@@ -289,68 +461,323 @@ ${notice}` : text;
     setTimeout(() => { aiThinking = false; aiMove(); }, 320);
   }
 
-  function lineScore(r, c, pid) {
-    let score = -(Math.abs(r - 4) + Math.abs(c - 4)) * 0.05;
-    for (const [dr, dc] of LINES) for (let off = -4; off <= 0; off++) {
-      let own = 0, enemy = 0, ok = true;
-      for (let k = 0; k < 5; k++) {
-        const rr = r + dr * (off + k), cc = c + dc * (off + k);
-        if (!inB(rr, cc)) { ok = false; break; }
-        const unit = engine.board[rr][cc];
-        if (unit && unit.pid === pid) own++; else if (unit) enemy++;
-      }
-      if (!ok || (own && enemy)) continue;
-      if (!enemy) score += own * own * 1.15 + (own === 4 ? 500 : 0);
-      if (!own) score += 0.95 * (enemy * enemy + (enemy === 4 ? 520 : 0));
+  const AI_PID = 2;
+  const HUMAN_PID = 1;
+  const AI_GHOST_ID = -2002;
+  const AI_TYPES = ["sword", "shield", "spear"];
+  const AI_LINE_WEIGHT = [0, 1, 6, 28, 190, 6000];
+
+  function cloneBoard(board = engine.board) {
+    return board.map(row => row.map(unit => (unit ? { ...unit } : null)));
+  }
+
+  function findById(board, id) {
+    for (let r = 0; r < board.length; r++) for (let c = 0; c < board[r].length; c++) {
+      if (board[r][c]?.id === id) return [r, c];
     }
-    for (const [dr, dc] of ORTHO) {
-      const unit = inB(r + dr, c + dc) && engine.board[r + dr][c + dc];
-      if (unit) score += unit.pid === pid ? 0.25 : 0.4;
+    return null;
+  }
+
+  function removeById(board, id) {
+    const pos = findById(board, id);
+    if (pos) board[pos[0]][pos[1]] = null;
+  }
+
+  function projectAfterCombat(board, view) {
+    const projected = cloneBoard(board);
+    for (const hit of view?.damage || []) {
+      const pos = findById(projected, hit.unitId);
+      if (pos) projected[pos[0]][pos[1]].hp = hit.hpAfter;
+    }
+    for (const item of view?.cleaves || []) {
+      const pos = findById(projected, item.unitId);
+      if (!pos) continue;
+      const unit = projected[pos[0]][pos[1]];
+      projected[pos[0]][pos[1]] = null;
+      projected[item.to.r][item.to.c] = unit;
+      if (item.followUp) {
+        const target = findById(projected, item.followUp.unitId);
+        if (target) projected[target[0]][target[1]].hp = item.followUp.hpAfter;
+      }
+    }
+    for (const item of view?.reflections || []) {
+      const pos = findById(projected, item.unitId);
+      if (pos) projected[pos[0]][pos[1]].hp = item.hpAfter;
+    }
+    for (const death of view?.deaths || []) removeById(projected, death.unit?.id);
+    return projected;
+  }
+
+  function shapeScore(board) {
+    const size = board.length;
+    let score = 0;
+    for (let r = 0; r < size; r++) for (let c = 0; c < size; c++) {
+      for (const [dr, dc] of LINES) {
+        const cells = [];
+        for (let k = 0; k < 5; k++) {
+          const rr = r + dr * k, cc = c + dc * k;
+          if (rr < 0 || cc < 0 || rr >= size || cc >= size) { cells.length = 0; break; }
+          cells.push(board[rr][cc]);
+        }
+        if (!cells.length) continue;
+        let mine = 0, foe = 0;
+        for (const unit of cells) {
+          if (unit?.pid === AI_PID) mine++;
+          else if (unit?.pid === HUMAN_PID) foe++;
+        }
+        if (mine && foe) continue;
+        if (mine) score += AI_LINE_WEIGHT[mine] || 0;
+        else if (foe) score -= (AI_LINE_WEIGHT[foe] || 0) * 1.08;
+      }
     }
     return score;
   }
 
-  function aiMove() {
-    if (finished() || engine.current !== 2) { render(); return; }
-    const player = engine.players[1];
-    if (!player.hand.length) { render(); return; }
+  function materialValue(unit) {
+    if (!unit) return 0;
+    const hpRatio = unit.maxHp ? Math.max(0, unit.hp) / unit.maxHp : 0;
+    return 22 + (unit.cards || 1) * 14 + hpRatio * 10;
+  }
 
-    let best = null, bestScore = -Infinity;
-    for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
-      if (engine.board[r][c]) continue;
-      const score = lineScore(r, c, 2);
-      if (score > bestScore) { bestScore = score; best = [r, c]; }
+  function combatScore(view, candidateBoard, focusId = null) {
+    if (!view) return 0;
+    let score = 0;
+    for (const hit of view.damage || []) {
+      const actual = Number(hit.actualDamage ?? hit.damage ?? 0);
+      score += hit.pid === HUMAN_PID ? actual * 0.24 : -actual * 0.28;
     }
-    if (!best) { render(); return; }
-
-    const counts = { sword: 0, shield: 0, spear: 0 };
-    player.hand.forEach(type => counts[type]++);
-    const [r, c] = best;
-    // 選兵種：優先剋制落點附近的敵人
-    let type = player.hand[0], typeScore = -Infinity;
-    for (const candidate of Object.keys(counts).filter(item => counts[item])) {
-      let score = counts[candidate] * 0.05;
-      for (const [dr, dc] of ORTHO) for (let d = 1; d <= 2; d++) {
-        const unit = inB(r + dr * d, c + dc * d) && engine.board[r + dr * d][c + dc * d];
-        if (!unit) continue;
-        if (unit.pid !== 2 && catalog()[candidate].counters === unit.type) score += 2;
-        break;
+    for (const death of view.deaths || []) {
+      const value = materialValue(death.unit);
+      score += death.unit?.pid === HUMAN_PID ? value * 1.35 : -value * 1.55;
+    }
+    for (const packet of view.packets || []) {
+      if (!packet.counterBonus) continue;
+      score += packet.from?.pid === AI_PID ? 5 : -5;
+    }
+    for (const cleave of view.cleaves || []) score += cleave.pid === AI_PID ? 18 : -18;
+    for (const reflection of view.reflections || []) {
+      const shieldPos = findById(candidateBoard, reflection.shieldId);
+      const shield = shieldPos ? candidateBoard[shieldPos[0]][shieldPos[1]] : null;
+      score += shield?.pid === AI_PID ? reflection.damage * 0.18 : -reflection.damage * 0.18;
+    }
+    for (const guards of Object.values(view.guards || {})) {
+      for (const guard of guards || []) {
+        const pos = findById(candidateBoard, guard.unitId);
+        const unit = pos ? candidateBoard[pos[0]][pos[1]] : null;
+        score += unit?.pid === AI_PID ? 3 : -3;
       }
-      if (score > typeScore) { typeScore = score; type = candidate; }
     }
-    const eliteOut = engine.board.flat()
-      .some(unit => unit && unit.pid === 2 && unit.rank === 2 && unit.type === type);
-    const rank = counts[type] >= 3 && !eliteOut && Math.random() < 0.5 ? 2 : 1;
+    if (focusId !== null) {
+      const died = (view.deaths || []).some(item => String(item.unit?.id) === String(focusId));
+      if (died) score -= 85;
+      else {
+        const ownHit = (view.damage || []).find(item => String(item.unitId) === String(focusId));
+        if (ownHit && ownHit.hpAfter > 0) score += Math.min(14, ownHit.hpAfter * 0.06);
+      }
+    }
+    return score;
+  }
 
-    const result = engine.deploy(2, { r, c, type, rank, turnId: engine.turnId });
-    if (!result.ok) engine.deploy(2, { r, c, type, rank: 1, turnId: engine.turnId });
+  function centerBias(r, c, board = engine.board) {
+    const mid = (board.length - 1) / 2;
+    return -(Math.abs(r - mid) + Math.abs(c - mid)) * 0.12;
+  }
+
+  function eliteOnBoard(pid, type) {
+    return engine.board.flat().some(unit => unit && unit.pid === pid && unit.rank === 2 && unit.type === type);
+  }
+
+  function handCounts(pid) {
+    const counts = Object.fromEntries(AI_TYPES.map(type => [type, 0]));
+    for (const type of engine.players[pid - 1].hand) if (Object.hasOwn(counts, type)) counts[type]++;
+    return counts;
+  }
+
+  function legalRanks(type, counts) {
+    const ranks = [1];
+    const eliteCost = FiveLine.cardCost(2);
+    if (eliteCost > 0 && counts[type] >= eliteCost && !eliteOnBoard(AI_PID, type)) ranks.push(2);
+    return ranks;
+  }
+
+  function scoreDeployment(r, c, type, rank) {
+    const stats = FiveLine.baseStats(type, rank);
+    if (!stats) return -Infinity;
+    const ghost = {
+      id: AI_GHOST_ID, pid: AI_PID, type, rank, cards: 0,
+      hp: stats.maxHp, maxHp: stats.maxHp, atk: stats.atk,
+    };
+    const candidate = cloneBoard();
+    candidate[r][c] = { ...ghost };
+    const view = UI.forecast(engine.board, { r, c, unit: ghost });
+    const projected = projectAfterCombat(candidate, view);
+    let score = shapeScore(projected) + combatScore(view, candidate, AI_GHOST_ID) + centerBias(r, c);
+
+    const survives = Boolean(findById(projected, AI_GHOST_ID));
+    if (rank === 2) {
+      // ★★不是免費升級：除非更高耐久或菁英能力真的改善局面，否則保留額外手牌。
+      score -= 26;
+      if (survives) score += 7;
+      if (type === "sword" && (view.cleaves || []).some(item => item.unitId === AI_GHOST_ID)) score += 30;
+      if (type === "shield" && (view.reflections || []).some(item => item.shieldId === AI_GHOST_ID)) score += 26;
+      if (type === "spear" && (view.packets || []).some(item => item.from?.unitId === AI_GHOST_ID && item.distance === 2)) score += 18;
+    }
+    if (!survives) score -= 55;
+    return score;
+  }
+
+  function chooseDeployment() {
+    const counts = handCounts(AI_PID);
+    let best = null;
+    for (let r = 0; r < engine.board.length; r++) for (let c = 0; c < engine.board[r].length; c++) {
+      if (engine.board[r][c]) continue;
+      for (const type of AI_TYPES) {
+        if (!counts[type]) continue;
+        for (const rank of legalRanks(type, counts)) {
+          const score = scoreDeployment(r, c, type, rank);
+          if (!best || score > best.score) best = { r, c, type, rank, score };
+        }
+      }
+    }
+    return best;
+  }
+
+  function scoreMove(move) {
+    const candidate = cloneBoard();
+    const [r, c] = move.from, [toR, toC] = move.to;
+    const unit = candidate[r][c];
+    if (!unit) return -Infinity;
+    candidate[toR][toC] = unit;
+    candidate[r][c] = null;
+    const view = UI.forecast(candidate, null);
+    const projected = projectAfterCombat(candidate, view);
+    let score = shapeScore(projected) + combatScore(view, candidate, unit.id) + centerBias(toR, toC, candidate);
+    if (!findById(projected, unit.id)) score -= 45;
+    return score;
+  }
+
+  function chooseMove() {
+    let best = null;
+    for (const move of engine.legalMoves(AI_PID)) {
+      const score = scoreMove(move);
+      if (!best || score > best.score) best = { ...move, score };
+    }
+    return best;
+  }
+
+  function threatBrokenByPlan(threat, plan) {
+    return plan.hits.some(hit => hit.dies && hit.unit?.pid === HUMAN_PID
+      && threat.cells.some(([r, c]) => r === hit.r && c === hit.c));
+  }
+
+  function scoreArtillery(r, c) {
+    const rules = GameEngine.artilleryRules();
+    const plan = UI.forecastArtillery(engine.board, r, c, rules, AI_PID);
+    if (!plan) return null;
+    let score = 0;
+    for (const hit of plan.hits) {
+      if (!hit.unit) continue;
+      const actual = Math.min(Math.max(0, hit.unit.hp), hit.damage);
+      const value = materialValue(hit.unit);
+      if (hit.unit.pid === HUMAN_PID) {
+        score += actual * 0.24;
+        if (hit.dies) score += value * 1.35;
+      } else {
+        score -= actual * 0.32;
+        if (hit.dies) score -= value * 1.65;
+      }
+    }
+
+    let brokenFour = 0, brokenFive = 0;
+    for (const threat of engine.threatWindows(HUMAN_PID).values()) {
+      if (!threatBrokenByPlan(threat, plan)) continue;
+      if (threat.kind === 5) brokenFive++;
+      else brokenFour++;
+    }
+    score += brokenFour * 120 + brokenFive * 900;
+    if (!plan.enemies) score -= 35;
+    return { r, c, plan, score, brokenFour, brokenFive };
+  }
+
+  function chooseArtillery(phase) {
+    const player = engine.players[AI_PID - 1];
+    const rules = GameEngine.artilleryRules();
+    if (!player || player.artillery <= 0 || engine.artilleryUsedThisTurn) return null;
+
+    let best = null;
+    for (let r = 0; r < engine.board.length; r++) for (let c = 0; c < engine.board[r].length; c++) {
+      const candidate = scoreArtillery(r, c);
+      if (candidate && (!best || candidate.score > best.score)) best = candidate;
+    }
+    if (!best) return null;
+
+    const maxAmmo = Math.max(1, Number(rules.perPlayer || player.artillery));
+    const scarcity = 1 - Math.min(1, player.artillery / maxAmmo);
+    const threshold = (phase === "pre" ? 88 : 66) + scarcity * 20;
+    if (best.brokenFive > 0 || best.score >= threshold) return best;
+    return null;
+  }
+
+  function fireAiArtillery(phase) {
+    const shot = chooseArtillery(phase);
+    if (!shot) return false;
+    return engine.artillery(AI_PID, { r: shot.r, c: shot.c, turnId: engine.turnId }).ok;
+  }
+
+  function aiMove() {
+    if (finished() || engine.current !== AI_PID) { render(); return; }
+
+    // 先處理「現在不打就可能直接輸」或交換價值非常高的炮擊；炮擊後重新評估主行動。
+    fireAiArtillery("pre");
+
+    if (engine.canDeploy(AI_PID)) {
+      const choice = chooseDeployment();
+      if (choice) {
+        let result = engine.deploy(AI_PID, {
+          r: choice.r, c: choice.c, type: choice.type, rank: choice.rank, turnId: engine.turnId,
+        });
+        if (!result.ok && choice.rank === 2) {
+          result = engine.deploy(AI_PID, {
+            r: choice.r, c: choice.c, type: choice.type, rank: 1, turnId: engine.turnId,
+          });
+        }
+      }
+    } else {
+      const move = chooseMove();
+      if (move) engine.move(AI_PID, {
+        r: move.from[0], c: move.from[1], toR: move.to[0], toC: move.to[1], turnId: engine.turnId,
+      });
+    }
+
+    // 主行動完成後再看一次盤面；若沒有值得消耗的目標，就保留有限炮擊資源。
+    fireAiArtillery("post");
+    engine.endTurn(AI_PID, { turnId: engine.turnId });
     render();
   }
 
   // ---- 綁定 ----
   UI.wireRulesOverlay(catalog);
+  UI.wireBattleLogDrawer();
   $("#artilleryBtn").onclick = () => { if (humanTurn()) { artilleryMode = !artilleryMode; artilleryPlan = null; render(); } };
+  $("#endTurnBtn").onclick = () => {
+    if (endTurnReason()) return;
+    artilleryMode = false;
+    const result = engine.endTurn(engine.current, { turnId: engine.turnId });
+    notice = result.ok ? "" : result.error;
+    render();
+    if (result.ok) scheduleAi();
+  };
   $("#resetBtn").onclick = reset;
+  $("#resultRematchBtn").onclick = reset;
+  $("#resultLeaveBtn").onclick = () => {
+    resultOverlayDismissed = true;
+    resultReportOpen = false;
+    render();
+  };
+  $("#resultReportBtn").onclick = () => {
+    resultReportOpen = !resultReportOpen;
+    renderResultOverlay();
+  };
   $("#resignBtn").onclick = () => {
     if (!started() || finished()) return;
     // 只在本機顯示層結束對局，不修改 game_engine.js 的規則
@@ -376,5 +803,15 @@ ${notice}` : text;
   };
 
   $("#pveBtn").classList.add("active");
+  setInterval(() => {
+    if (!engine || finished()) { updateTurnTimer(); return; }
+    const result = engine.checkTurnTimeout(Date.now());
+    if (result?.ok) {
+      notice = "回合逾時，已自動結束回合。";
+      artilleryMode = false; selectedType = null; moveFrom = null;
+      render();
+      scheduleAi();
+    } else updateTurnTimer();
+  }, 250);
   reset();
 })();
