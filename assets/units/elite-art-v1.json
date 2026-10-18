@@ -1,0 +1,19 @@
+{
+  "generation_mode": "built-in image_gen",
+  "use_case": "stylized-concept",
+  "generated_on": "2026-10-18",
+  "assets": [
+    {
+      "path": "assets/units/elite-shield-v1.png",
+      "reference": "assets/units/shield-v1.png",
+      "role": "Elite shield portrait for shared unit details and tutorial",
+      "prompt": "Use case: stylized-concept. Asset type: square full-body unit portrait for an existing ancient Chinese tactical board game. Input image 1 is the existing basic unit, a reference for art direction, materials, palette and readable weapon silhouette; create a NEW elite counterpart, do not replace the source image. Match the reference's semi-realistic painterly rendering, dark iron lamellar armor, weathered antique bronze trim, muted dark red cloth, warm upper-left light, smoky brown-gray backdrop and dusty earth. Full body and all equipment inside a square composition with breathing room; a single standing soldier, detailed face and natural anatomy. Keep the same restrained grounded ancient military world, no supernatural effects. No text, letters, stars, numbers, logos, watermark, frame, UI, extra people, modern items, glowing magic, or bright gold costume. Opaque background. Subject: elite shield veteran, a visibly heavier armored version of the reference shield infantry. A broad reinforced tower shield dominates the right half of the portrait; thick layered dark iron edge, worn bronze binding and raised geometric central reinforcement. Mature battle-hardened face beneath a crested helmet, broader reinforced shoulder plates and forearm guards, firm planted defensive stance, left hand naturally gripping the shield behind it. Show shield weight and authority through silhouette, not special effects. Retain the reference's shield-bearing role and muted red crest."
+    },
+    {
+      "path": "assets/units/elite-spear-v1.png",
+      "reference": "assets/units/spear-v1.png",
+      "role": "Elite spear portrait for shared unit details and tutorial",
+      "prompt": "Use case: stylized-concept. Asset type: square full-body unit portrait for an existing ancient Chinese tactical board game. Input image 1 is the existing basic unit, a reference for art direction, materials, palette and readable weapon silhouette; create a NEW elite counterpart, do not replace the source image. Match the reference's semi-realistic painterly rendering, dark iron lamellar armor, weathered antique bronze trim, muted dark red cloth, warm upper-left light, smoky brown-gray backdrop and dusty earth. Full body and all equipment inside a square composition with breathing room; a single standing soldier, detailed face and natural anatomy. Keep the same restrained grounded ancient military world, no supernatural effects. No text, letters, stars, numbers, logos, watermark, frame, UI, extra people, modern items, glowing magic, or bright gold costume. Opaque background. Subject: elite spear veteran, a visibly more experienced and better equipped counterpart of the reference spear infantry. Long single spear held diagonally from lower left to upper right, both hands naturally gripping one straight continuous wooden shaft, clearly visible refined leaf-shaped steel spearhead and muted dark-red tassel. Fitted reinforced iron lamellar chest, layered bronze-edged shoulder guards, bracers and greaves, modest red cloth, tied-back black hair and focused veteran face. Athletic braced stance and elegant long reach; keep spearhead and feet fully in frame. Distinguish elite status through armor craftsmanship and confident posture."
+    }
+  ]
+}

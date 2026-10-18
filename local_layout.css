@@ -227,11 +227,13 @@ body {
   height: 310px;
 }
 
-/* 戰況側欄使用固定三列；文字增加時只在各自區塊內捲動。 */
+/* 戰況側欄使用固定兩列；戰鬥紀錄移到覆蓋式抽屜，不再常駐佔位。 */
 .side {
   padding: 10px;
   display: grid;
-  grid-template-rows: 282px 112px minmax(0, 1fr);
+  /* 第四階段多一列固定高度的「結束回合」。335px 正好保留原本各列與說明槽，
+     不讓新按鈕溢出後被 section 的 overflow 裁掉。 */
+  grid-template-rows: 335px minmax(112px, 1fr);
   gap: 9px;
   overflow: hidden;
 }
@@ -250,7 +252,7 @@ body {
   display: grid;
   /* 多一列 22px 給加賽／消極警示條。這一列永遠存在，沒有警示時是空的，
      不會因為出現或消失而把下面的東西擠上擠下。 */
-  grid-template-rows: 20px 28px 22px 42px 40px 47px minmax(0, 1fr);
+  grid-template-rows: 20px 28px 22px 42px 40px 47px 47px minmax(0, 1fr);
   gap: 6px;
 }
 
@@ -263,6 +265,54 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: clamp(21px, 1.7vw, 26px);
+  line-height: 28px;
+  letter-spacing: .01em;
+  transition: color .18s ease, text-shadow .18s ease;
+}
+
+/* 「目前回合」本身就是固定槽位的玩家資訊帶；只換色與發光，不改尺寸。 */
+.turnSection {
+  transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease;
+}
+.turnSection.active-p1 {
+  border-color: rgba(255, 107, 107, .9);
+  box-shadow: inset 0 0 0 1px rgba(255, 107, 107, .2), 0 0 22px rgba(255, 107, 107, .2);
+  background: linear-gradient(135deg, rgba(255, 107, 107, .1), #151922 46%);
+}
+.turnSection.active-p2 {
+  border-color: rgba(77, 171, 247, .9);
+  box-shadow: inset 0 0 0 1px rgba(77, 171, 247, .2), 0 0 22px rgba(77, 171, 247, .2);
+  background: linear-gradient(135deg, rgba(77, 171, 247, .1), #151922 46%);
+}
+.turn.p1t { color: var(--p1); text-shadow: 0 0 16px rgba(255, 107, 107, .42); }
+.turn.p2t { color: var(--p2); text-shadow: 0 0 16px rgba(77, 171, 247, .42); }
+
+/* 棋盤外框同步顯示行動方；終局後由 client 清掉這兩個 class。 */
+.board.active-p1 {
+  border-color: var(--p1);
+  box-shadow: 0 0 0 2px rgba(255, 107, 107, .24), 0 16px 42px rgba(0, 0, 0, .24), 0 0 24px rgba(255, 107, 107, .18);
+}
+.board.active-p2 {
+  border-color: var(--p2);
+  box-shadow: 0 0 0 2px rgba(77, 171, 247, .24), 0 16px 42px rgba(0, 0, 0, .24), 0 0 24px rgba(77, 171, 247, .18);
+}
+
+/* 對手／電腦行動時只降低操作區亮度，固定牌架仍完整佔位。 */
+.handPanel.inactive-turn .hand,
+.handPanel.inactive-turn .rankRow {
+  opacity: .38;
+  filter: saturate(.55);
+}
+.hand,
+.rankRow {
+  transition: opacity .18s ease, filter .18s ease;
+}
+
+.btn:disabled,
+.card:disabled {
+  cursor: not-allowed;
+  opacity: .52;
 }
 
 /* 警示條：固定佔位，靠 level class 上色。空字串時完全透明。 */
@@ -294,8 +344,21 @@ body {
 
 .actionStatus,
 .artilleryStatus,
-.artBtn {
+.artBtn,
+.endTurnBtn {
   margin-top: 0;
+}
+
+.artBtn {
+  overflow: hidden;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+.endTurnBtn {
+  overflow: hidden;
+  line-height: 1.25;
+  white-space: normal;
 }
 
 .turnSection .note {
@@ -304,8 +367,7 @@ body {
   overflow: auto;
 }
 
-.previewSection,
-.logSection {
+.previewSection {
   display: grid;
   grid-template-rows: 20px minmax(0, 1fr);
 }
@@ -313,13 +375,6 @@ body {
 .previewSection .combatPreview {
   min-height: 0;
   overflow: auto;
-}
-
-.logSection .log {
-  height: auto;
-  min-height: 0;
-  overflow: auto;
-  scrollbar-gutter: stable;
 }
 
 /* 中等寬度：保持固定槽位，手牌移到底部以保住棋盤可用寬度。 */
@@ -456,7 +511,7 @@ body {
   .side {
     height: 620px;
     margin: 0;
-    grid-template-rows: 282px 112px minmax(0, 1fr);
+    grid-template-rows: 335px minmax(112px, 1fr);
   }
 
   .cardDetail {

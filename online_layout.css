@@ -1,0 +1,633 @@
+/* 連線專屬版面：大廳與對局是兩個獨立畫面。規則與數值仍由共用引擎提供。 */
+.connection { font-weight: 800; white-space: nowrap; }
+.connection.ok, .ok { color: var(--good); }
+.connection.bad, .bad { color: var(--danger); }
+.connection.wait, .wait { color: var(--warn); }
+.btn.art { background: #604d12; }
+
+.lobbyScreen {
+  width: 100vw;
+  height: 100vh;
+  padding: clamp(14px, 2vw, 28px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 18px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 15% 8%, rgba(77, 171, 247, .12), transparent 28%),
+    radial-gradient(circle at 84% 82%, rgba(255, 107, 107, .09), transparent 30%),
+    var(--bg);
+}
+
+.lobbyHeader {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.lobbyBrand h1 {
+  margin: 0;
+  font-size: clamp(26px, 3vw, 40px);
+  letter-spacing: .04em;
+}
+
+.lobbyBrand p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.lobbyHeaderActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.lobbyLayout {
+  width: min(1180px, 100%);
+  min-height: 0;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 370px);
+  gap: 18px;
+  overflow: hidden;
+}
+
+.lobbyLayout.seated {
+  grid-template-columns: minmax(320px, 520px);
+  justify-content: center;
+}
+
+.lobbyLayout.seated .lobbyRail {
+  display: grid;
+  align-items: center;
+}
+
+.roomDirectory,
+.lobbyCard {
+  border: 1px solid #2d3747;
+  border-radius: 18px;
+  background: rgba(23, 28, 36, .96);
+  box-shadow: 0 18px 55px rgba(0, 0, 0, .2);
+}
+
+.roomDirectory {
+  min-height: 0;
+  padding: clamp(16px, 2vw, 24px);
+  display: grid;
+  grid-template-rows: auto 28px minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.lobbySectionHead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  padding-bottom: 14px;
+}
+
+.sectionEyebrow {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+}
+
+.lobbySectionHead h2,
+.lobbyCard h2 {
+  margin: 4px 0 0;
+  font-size: 20px;
+}
+
+.roomCount {
+  padding: 5px 9px;
+  border: 1px solid #3b4658;
+  border-radius: 999px;
+  color: #cbd5e1;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.lobbyNotice,
+.modalNotice {
+  min-height: 28px;
+  overflow: hidden;
+  color: var(--warn);
+  font-size: 12px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roomList {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 116px;
+  align-content: start;
+  gap: 11px;
+  overflow-y: auto;
+  padding: 2px 3px 2px 0;
+  scrollbar-gutter: stable;
+}
+
+.roomCard {
+  min-width: 0;
+  height: 116px;
+  padding: 14px 15px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto 1fr auto;
+  gap: 5px 10px;
+  border: 1px solid #394558;
+  border-radius: 13px;
+  background: linear-gradient(145deg, #202936, #171d27);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.roomCard:hover,
+.roomCard:focus-visible {
+  border-color: #6d7f9d;
+  background: linear-gradient(145deg, #273345, #1b2330);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(77, 171, 247, .12);
+}
+
+.roomCardName {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roomLock {
+  color: var(--warn);
+  font-size: 16px;
+}
+
+.roomCreator,
+.roomAge {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.roomStatus {
+  align-self: end;
+  color: var(--good);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.roomJoinHint {
+  align-self: end;
+  color: #dbeafe;
+  font-size: 11px;
+}
+
+.emptyRooms {
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 7px;
+  border: 1px dashed #374151;
+  border-radius: 13px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.emptyRooms strong { color: #cbd5e1; }
+.emptyRooms span:last-child { font-size: 12px; }
+.emptyIcon { font-size: 28px; filter: grayscale(.3); }
+
+.lobbyRail,
+.lobbyRailStack {
+  min-height: 0;
+}
+
+.lobbyRailStack {
+  height: 100%;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.lobbyCard {
+  padding: 18px;
+}
+
+.createRoomCard {
+  display: flex;
+  flex-direction: column;
+}
+
+.fieldLabel {
+  margin: 13px 0 5px;
+  color: #d7deea;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.fieldLabel span {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.lobbyInput {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  padding: 8px 10px;
+  border: 1px solid #3b4658;
+  border-radius: 9px;
+  outline: none;
+  background: #0f141d;
+  color: var(--text);
+}
+
+.lobbyInput:focus {
+  border-color: var(--p2);
+  box-shadow: 0 0 0 3px rgba(77, 171, 247, .13);
+}
+
+.roomCodeInput { text-transform: uppercase; letter-spacing: .13em; }
+.primaryLobbyBtn {
+  border-color: #3b82f6;
+  background: #1d4e89;
+  color: #eff6ff;
+}
+.primaryLobbyBtn:hover:not(:disabled) { background: #2563a5; }
+.createRoomCard .primaryLobbyBtn { margin-top: auto; }
+
+.directJoinCard h2 { margin-bottom: 11px; }
+.directJoinFields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+.directJoinCard .btn { width: 100%; }
+
+.seatedRoomPanel {
+  align-self: center;
+  padding: 24px;
+}
+
+.waitingPulse {
+  margin: 15px 0 8px;
+  color: var(--warn);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.waitingPulse > span {
+  width: 8px;
+  height: 8px;
+  margin-right: 7px;
+  display: inline-block;
+  border-radius: 50%;
+  background: var(--warn);
+  box-shadow: 0 0 0 0 rgba(255, 212, 59, .55);
+  animation: waitingRoomPulse 1.7s ease-out infinite;
+}
+
+.roomIdentity {
+  min-height: 36px;
+  margin: 7px 0 17px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
+.seatStatusRow {
+  min-height: 58px;
+  margin-top: 9px;
+  padding: 9px 10px;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #303a4b;
+  border-radius: 11px;
+  background: #111722;
+}
+
+.seatStatusRow div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.seatStatusRow strong,
+.seatStatusRow span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seatStatusRow div > span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.playerAvatar {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #596579;
+  border-radius: 50%;
+  background: #252d39;
+  color: #e5e7eb;
+  font-size: 11px;
+  font-weight: 1000;
+}
+.playerAvatar.p1Avatar { border-color: var(--p1); background: #71303a; }
+.playerAvatar.p2Avatar { border-color: var(--p2); background: #24517a; }
+.playerAvatar.neutralAvatar { border-color: #596579; background: #252d39; }
+
+.statusDot {
+  width: 10px;
+  height: 10px;
+  display: inline-block;
+  border: 2px solid #697386;
+  border-radius: 50%;
+  background: #2d3440;
+}
+.statusDot.online {
+  border-color: #8ce99a;
+  background: var(--good);
+  box-shadow: 0 0 8px rgba(81, 207, 102, .65);
+}
+.statusDot.offline {
+  border-color: #ff8787;
+  background: var(--danger);
+}
+
+.seatedActions,
+.modalActions {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+
+.passwordBox { max-width: 430px; }
+.passwordBox .lobbyInput { margin-top: 4px; }
+.modalNotice { margin-top: 6px; }
+
+.gameScreen {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.gameTop .helpBtn { margin-left: auto; }
+.gameRoomName {
+  max-width: min(260px, 22vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.onlineGameLayout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.onlineGameCol {
+  grid-template-rows: 64px minmax(0, 1fr) 92px var(--local-hand-height);
+}
+
+.playerBand {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #303a4b;
+  border-radius: 13px;
+  background: #151b25;
+  transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease;
+}
+
+.opponentBand {
+  padding: 8px 12px;
+  display: grid;
+  grid-template-columns: 42px minmax(130px, 1fr) 70px 70px auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.selfBand.turnSection {
+  min-height: 0;
+  padding: 9px 11px;
+  display: grid;
+  grid-template-columns: 42px minmax(110px, .8fr) minmax(165px, 1fr) minmax(180px, 1.2fr) auto minmax(260px, 1.3fr);
+  grid-template-rows: minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.playerBand.active-turn {
+  border-color: currentColor;
+  box-shadow: inset 0 0 0 1px currentColor, 0 0 22px color-mix(in srgb, currentColor 22%, transparent);
+}
+.playerBand.p1Band { color: var(--p1); }
+.playerBand.p2Band { color: var(--p2); }
+.playerBand .bandIdentity,
+.playerBand .bandStat,
+.playerBand .bandConnection,
+.playerBand .selfResources,
+.playerBand .bandActionStatus { color: var(--text); }
+
+.bandIdentity {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.bandIdentity strong {
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bandIdentity span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.bandStat {
+  min-width: 54px;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+}
+.bandStat span {
+  color: var(--muted);
+  font-size: 10px;
+}
+.bandStat strong {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bandConnection {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.bandTurn {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: 30px 22px;
+  gap: 4px;
+}
+.bandTurn .turn {
+  font-size: clamp(18px, 1.55vw, 24px);
+}
+.bandTurn .phaseBadge { height: 22px; }
+
+.bandActionStatus {
+  height: 62px;
+  overflow: auto;
+  color: #d7deea;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.selfResources {
+  display: flex;
+  gap: 6px;
+}
+
+.turnActions {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px;
+}
+
+.selfBand .artBtn,
+.selfBand .endTurnBtn {
+  width: 100%;
+  height: 58px;
+  margin: 0;
+  overflow: hidden;
+  line-height: 1.2;
+  white-space: normal;
+}
+
+@keyframes waitingRoomPulse {
+  70% { box-shadow: 0 0 0 9px rgba(255, 212, 59, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 212, 59, 0); }
+}
+
+@media (max-width: 1100px) {
+  .roomList { grid-template-columns: minmax(0, 1fr); }
+  .selfBand.turnSection {
+    grid-template-columns: 40px minmax(92px, .7fr) minmax(145px, 1fr) minmax(155px, 1.15fr) auto minmax(220px, 1fr);
+    gap: 7px;
+  }
+}
+
+@media (max-width: 900px) {
+  .lobbyScreen {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+  .lobbyLayout {
+    grid-template-columns: minmax(0, 1fr);
+    overflow: visible;
+  }
+  .roomDirectory { min-height: 520px; }
+  .roomList { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lobbyRailStack { overflow: visible; }
+
+  .gameScreen {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+  .onlineGameCol {
+    grid-template-rows: 60px min(94vw, 72vh) 112px 188px;
+  }
+  .selfBand.turnSection {
+    grid-template-columns: 38px minmax(90px, .7fr) minmax(150px, 1fr) minmax(140px, 1fr) auto minmax(210px, .9fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 680px) {
+  .lobbyHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .lobbyHeaderActions { justify-content: flex-start; }
+  .roomList { grid-template-columns: minmax(0, 1fr); }
+  .directJoinFields { grid-template-columns: minmax(0, 1fr); }
+
+  .gameTop .gameRoomName,
+  .gameTop .pill { display: none; }
+  .onlineGameCol {
+    grid-template-rows: 58px min(96vw, 68vh) 214px 188px;
+  }
+  .opponentBand {
+    grid-template-columns: 38px minmax(0, 1fr) 54px 54px;
+  }
+  .opponentBand .bandConnection { display: none; }
+  .selfBand.turnSection {
+    padding: 8px;
+    grid-template-columns: 32px minmax(58px, .65fr) minmax(90px, 1fr) minmax(64px, .7fr);
+    grid-template-rows: 58px 56px 70px;
+    gap: 7px;
+  }
+  .selfBand .bandTurn {
+    grid-column: 3 / 5;
+    grid-row: 1;
+  }
+  .selfBand .bandActionStatus {
+    grid-column: 1 / 5;
+    grid-row: 3;
+    height: 70px;
+  }
+  .selfBand .selfResources {
+    grid-column: 1 / 3;
+    grid-row: 2;
+  }
+  .selfBand .selfResources .bandStat {
+    min-width: 0;
+    flex: 1;
+  }
+  .selfBand .turnActions {
+    grid-column: 3 / 5;
+    grid-row: 2;
+  }
+  .selfBand .artBtn,
+  .selfBand .endTurnBtn {
+    height: 56px;
+  }
+  .selfBand .playerAvatar { width: 34px; height: 34px; }
+  .bandTurn .turn { font-size: 17px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .waitingPulse > span { animation: none; }
+}

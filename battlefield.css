@@ -1,0 +1,230 @@
+/* 設計 v1：共用的戰場、卡牌與固定確認位置。 */
+:root {
+  --bg: #141b1b; --panel: #1c2424; --panel2: #29312e; --text: #e9e5d9;
+  --muted: #b4b4a7; --p1: #d68b7d; --p2: #86afc0; --warn: #d4b57b;
+  --danger: #ef9b89; --good: #a6bf9b; --grid: #514c41;
+}
+html { height: auto; min-height: 100%; overflow: auto; scrollbar-gutter: stable; }
+body.battleDesign { height: auto; min-height: 100dvh; overflow: visible; background: var(--bg); }
+.battleDesign .hidden { display: none !important; }
+.battleDesign .gameScreen { height: auto; min-height: 100dvh; overflow: visible; }
+.battleDesign .battlefield { width: min(100%, 1600px); margin: auto; padding: 16px 28px 28px; }
+.battleDesign .btn { min-height: 44px; border: 1px solid #566055; border-radius: 8px; background: #27302d; color: var(--text); font-size: 14px; }
+.battleDesign .btn:hover:not(:disabled) { background: #354037; border-color: #b5a17a; }
+.battleDesign button:disabled { cursor: default; opacity: .6; }
+.battleDesign :is(button,summary,a,input):focus-visible { outline: 3px solid #f4d69b; outline-offset: 3px; }
+.battleDesign .btn.active { outline: 2px solid var(--warn); outline-offset: -2px; background: #3c3d2c; }
+.battleDesign .battleTop { height: auto; min-height: 64px; overflow: visible; justify-content: space-between; flex-wrap: wrap; gap: 12px; border-bottom: 1px solid #41483e; margin-bottom: 24px; padding-bottom: 14px; }
+.battleBrand, .battleTools { display: flex; gap: 10px; align-items: center; }
+.battleBrand h1 { font-family: Georgia, "Noto Serif TC", serif; font-size: 26px; letter-spacing: .16em; margin: 0; }
+.battleBrand > span { font-size: 13px; color: var(--muted); padding-left: 6px; }
+.weaponIcon { width: 28px; height: 28px; flex: 0 0 auto; color: currentColor; }
+.battleBrand > .weaponIcon { color: var(--warn); width: 26px; }
+.battleDesign .matchMenu { position: relative; right: auto; bottom: auto; z-index: 40; }
+.battleDesign .matchMenuSummary { min-width: 100px; display: flex; align-items: center; justify-content: center; padding: 8px 12px; }
+.battleDesign .matchMenuPanel { top: calc(100% + 8px); bottom: auto; right: 0; width: 230px; max-height: 75dvh; overflow-y: auto; background: var(--panel); border-color: #596052; }
+.menuInfo { display: block; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.battleLayout { display: grid; grid-template-columns: minmax(140px, .55fr) minmax(390px, 2fr) minmax(280px, .95fr); gap: 26px; align-items: start; }
+.battleSidebar { color: var(--muted); padding: 8px 6px; font-size: 14px; }
+.battleSidebar h2 { color: var(--text); font-size: 24px; margin: 0 0 6px; }
+.roundKind { display: block; margin-bottom: 34px; color: var(--warn); }
+.battleSidebar h3 { font-size: 13px; font-weight: 500; letter-spacing: .14em; margin: 0 0 16px; }
+.battleFlow { display: grid; gap: 12px; padding: 0; list-style: none; margin: 0 0 34px; }
+.battleFlow li { padding: 12px; border: 1px solid #444d43; border-radius: 7px; }
+.battleFlow li.active { color: #ead5a9; border-color: #b59965; background: #303529; }
+.battleGoal { border-top: 1px solid #41483e; border-bottom: 1px solid #41483e; padding: 24px 0; margin-bottom: 28px; line-height: 1.7; }
+.battleGoal strong { color: var(--text); }
+.battleGoal p { margin-bottom: 0; }
+.counterLegend { display: grid; gap: 16px; }
+.counterLegend > div { display: flex; gap: 10px; align-items: center; font-size: 13px; }
+.counterLegend .weaponIcon { width: 21px; height: 26px; color: #d0c4a9; }
+.sidebarHint { margin-top: 30px; font-size: 12px; line-height: 1.9; }
+.battleCenter { min-width: 0; display: flex; flex-direction: column; gap: 0; }
+.battleDesign .playerBand { display: grid; align-items: center; grid-template-columns: 42px minmax(70px,1fr) 48px 48px 72px; grid-template-rows: auto; gap: 12px; min-width: 0; padding: 12px 14px; min-height: 74px; border: 1px solid #4a5147; border-radius: 10px; background: #202826; box-shadow: none; }
+.battleDesign .playerBand.active-turn { border-color: currentColor; box-shadow: inset 3px 0 currentColor; }
+.battleDesign .playerBand.p1Band { color: var(--p1); }
+.battleDesign .playerBand.p2Band { color: var(--p2); }
+.battleDesign .bandIdentity { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: var(--text); }
+.battleDesign .bandIdentity strong { font-size: 16px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.battleDesign .bandIdentity > span { font-size: 12px; color: var(--muted); }
+.battleDesign .playerAvatar { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; font-size: 13px; font-weight: 800; border: 2px solid #a4997e; background: #37413a; }
+.battleDesign .p1Avatar { color: #ffe5cb; background: #743e36; border-color: #c88974; box-shadow: inset 0 0 0 3px #743e36, inset 0 0 0 4px #bd8470; }
+.battleDesign .p2Avatar { color: #def0ed; background: #355764; border-color: #8bb0b8; border-radius: 9px; clip-path: polygon(22% 0,78% 0,100% 22%,100% 78%,78% 100%,22% 100%,0 78%,0 22%); }
+.battleDesign .bandStat { display: flex; flex-direction: column; gap: 2px; align-items: center; color: var(--text); }
+.battleDesign .bandStat > span { font-size: 11px; color: var(--muted); }
+.battleDesign .bandStat > strong { font-size: 18px; font-variant-numeric: tabular-nums; }
+.battleDesign .bandConnection { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; justify-content: flex-end; color: var(--muted); font-size: 11px; }
+.battleDesign .statusDot { width: 7px; height: 7px; border-radius: 50%; background: #8b8272; display: inline-block; }
+.battleDesign .statusDot.online { background: #acc29e; box-shadow: none; }
+.battleDesign .statusDot.offline { background: var(--danger); }
+.battlePhase { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 30px; min-height: 30px; font-size: 12px; color: var(--muted); }
+.battleDesign .phaseBadge { margin: 0; min-width: 0; flex: 1; height: 24px; padding: 3px 5px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.battleDesign .boardWrap { position: relative; width: 100%; height: auto; min-height: 0; max-height: none; aspect-ratio: 1; padding: 20px; overflow: visible; background: #403f36; border: 1px solid #847557; border-radius: 9px; box-shadow: inset 0 0 0 4px #2c3029, 0 12px 28px #080d0c55; }
+.battleDesign .board { border: 1px solid #494537; box-shadow: 0 0 0 3px #9c8a6333; overflow: hidden; background: #756c5d; }
+.battleDesign .board.active-p1, .battleDesign .board.active-p2 { border-color: #494537; box-shadow: 0 0 0 3px #9c8a6333; }
+.battleDesign .cell { appearance: none; padding: 0; border: 0; border-right: 1px solid #4f4a3c; border-bottom: 1px solid #4f4a3c; border-radius: 0; background: #756c5d; color: var(--text); touch-action: manipulation; }
+.battleDesign .cell:nth-child(even) { background: #6d6456; }
+.battleDesign .cell:nth-child(9n) { border-right: 0; }
+.battleDesign .cell:nth-last-child(-n+9) { border-bottom: 0; }
+.battleDesign .cell:hover { background: #8a7e68; }
+.battleDesign .cell:focus-visible { outline-offset: -4px; z-index: 2; }
+.battleDesign .cell.draftTarget { box-shadow: inset 0 0 0 3px #f0d18a; background: #8a7d58; }
+.battleDesign .cell.draftTarget.legalMove::after { display: none; }
+.battleDesign .cell.moveOrigin { box-shadow: inset 0 0 0 3px #d4b57b; }
+.battleDesign .cell.legalMove::after { content: ""; width: 22%; height: 22%; border: 2px solid #efce87; border-radius: 50%; background: #414738; position: absolute; pointer-events: none; }
+.battleDesign .unit, .battleDesign .unit.p1, .battleDesign .unit.p2 { width: 82%; height: 82%; left: 50%; top: 50%; border-width: 2px; overflow: hidden; line-height: 1; pointer-events: none; }
+.battleDesign .unit.p1 { border-color: #c78872; background: radial-gradient(circle at 40% 30%, #975447, #6d3c34); color: #ffe4bd; box-shadow: inset 0 0 0 3px #7a4138, inset 0 0 0 4px #d0967a, 0 2px 4px #17191055; }
+.battleDesign .unit.p2 { border-color: #8cbdc6; background: #385b68; color: #e3e6cf; border-radius: 8%; clip-path: polygon(22% 0,78% 0,100% 22%,100% 78%,78% 100%,22% 100%,0 78%,0 22%); box-shadow: inset 0 0 0 3px #456c78; }
+.battleDesign .unitIcon { width: 46%; height: 46%; top: 48%; display: flex; align-items: center; justify-content: center; }
+.battleDesign .unitIcon .weaponIcon { width: 100%; height: 100%; }
+.battleDesign .unit .stars { top: 7%; font-size: clamp(7px, .65vw, 11px); color: #ffe5a4; }
+.battleDesign .unit small { display: none; }
+.battleDesign .hpbar { left: 22%; right: 22%; bottom: 13%; height: 4px; border-radius: 3px; background: #1a2628; overflow: hidden; }
+.battleDesign .hpbar i { display: block; height: 100%; background: #e4c997; }
+.battleDesign .draftGhost { opacity: .6; display: grid; place-items: center; border-style: dashed; }
+.battleDesign .draftGhost > .weaponIcon { width: 48%; height: 48%; }
+.boardCoordinates { position: absolute; display: grid; color: #d0c3a4; text-align: center; font-size: 10px; pointer-events: none; }
+.boardCoordinates.columns { top: 3px; left: 20px; right: 20px; grid-template-columns: repeat(9,1fr); }
+.boardCoordinates.rows { top: 20px; bottom: 20px; left: 3px; width: 12px; grid-template-rows: repeat(9,1fr); align-items: center; }
+.battleDesign .combatPieceIcon { width: 48%; height: 48%; display: flex; }
+.battleDesign .combatPieceIcon .weaponIcon { width: 100%; height: 100%; }
+.battleDesign .combatPiece.p2 { border-radius: 8%; }
+.battleDesign .selfBand.turnSection { grid-template-columns: 38px minmax(62px,1fr) minmax(92px,auto) minmax(200px,1.7fr); grid-template-rows: 42px 18px; gap: 6px 12px; margin-top: 12px; padding: 12px 14px; overflow: visible; }
+.battleDesign .selfBand .bandTurn { grid-column: 3; grid-row: 1; display: flex; gap: 10px; align-items: center; justify-content: flex-end; min-width: 0; height: auto; }
+.battleDesign .bandTurn .turn { font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.battleDesign .turnTimer { min-width: 38px; font-size: 23px; color: var(--warn); text-align: right; }
+.battleDesign .turnTimer.urgent { color: var(--danger); }
+.battleDesign .selfBand .selfResources { display: flex; grid-row: 2; grid-column: 2 / 4; gap: 16px; font-size: 11px; color: var(--muted); margin: 0; }
+.battleDesign .selfBand .turnActions { display: grid; grid-row: 1 / 3; grid-column: 4; grid-template-columns: 1fr 1fr; gap: 10px; min-height: 0; }
+.battleDesign .selfBand .artBtn, .battleDesign .selfBand .endTurnBtn { width: 100%; height: 66px; margin: 0; font-size: 15px; padding: 8px 6px; white-space: normal; }
+.battleDesign .buttonReason { display: block; min-height: 16px; font-size: 11px; line-height: 1.35; font-weight: 400; color: inherit; }
+.battleDesign .endTurnBtn.ready:not(:disabled) { background: #bfaa75; color: #1c281e; border-color: #edd29b; }
+.battleDesign .turnSection.turn-ready { border-color: #d4b57b !important; }
+.battleNotice { height: 54px; min-height: 54px; padding: 10px 2px; overflow-y: auto; scrollbar-width: thin; }
+.battleDesign .battleNotice .status { height: auto; min-height: 0; max-height: none; padding: 0; margin: 0; font-size: 12px; line-height: 1.4; white-space: pre-line; color: #c2c3b6; overflow: visible; }
+.battleDesign .handPanel { position: relative; height: auto; min-height: 190px; padding: 12px; display: grid; grid-template-columns: 1fr; grid-template-rows: 24px 128px; gap: 10px; background: #1d2523; border-color: #4a5145; border-radius: 10px; overflow: visible; }
+.battleDesign .handHeader { display: flex; justify-content: space-between; align-items: center; grid-template-rows: none; padding: 0; border: 0; gap: 8px; min-width: 0; }
+.battleDesign .handHeader strong { font-size: 14px; }
+.battleDesign .handHeader .meta { font-size: 11px; color: var(--muted); }
+.battleDesign .hand { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); align-items: stretch; height: 128px; min-height: 128px; gap: 8px; padding: 0; margin: 0; overflow: visible; }
+.battleDesign .card { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 100%; min-width: 0; max-width: none; height: 128px; min-height: 128px; border: 1px solid #68705c; border-radius: 8px; padding: 5px; background: #303b31; overflow: hidden; box-shadow: none; }
+.battleDesign .card:hover:not(:disabled) { background: #3e4838; border-color: #c7b783; }
+.battleDesign .card.sel { outline: 2px solid #d4b57b; outline-offset: -2px; background: #444b32; border-color: #d4b57b; }
+.battleDesign .handPortrait { width: 100%; height: 73px; object-fit: cover; object-position: 50% 18%; border-radius: 4px; }
+.battleDesign .card > .weaponIcon { display: none; }
+.battleDesign .card .name { font-size: 14px; line-height: 1.25; }
+.battleDesign .card .cardTag { background: transparent; font-size: 10px; line-height: 1.2; margin: 0; padding: 0; color: #e0cfaa; white-space: nowrap; }
+.battleDesign .handPanel.inactive-turn { opacity: 1; filter: none; }
+.battleDesign .handPanel.inactive-turn .hand { opacity: 1; filter: none; }
+.detailRail { position: sticky; top: 16px; min-width: 0; height: calc(100dvh - 125px); min-height: 580px; display: grid; grid-template-rows: 76px minmax(0,1fr) 140px; gap: 14px; }
+.rankControls { min-width: 0; }
+.battleDesign .rankRow { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 76px; grid-auto-rows: auto; gap: 8px; padding: 0; border: 0; overflow: visible; align-content: stretch; }
+.battleDesign .rankRow > .btn { min-width: 0; height: 76px; padding: 8px 5px; white-space: normal; }
+.battleDesign #unitDetailBtn { display: none; }
+.battleDesign .cardDetail, .battleDesign .cardDetail.idle { position: static; display: block; transform: none; width: 100%; height: 100%; min-height: 0; pointer-events: auto; max-width: none; max-height: none; left: auto; right: auto; bottom: auto; margin: 0; padding: 0; overflow-y: auto; scrollbar-width: thin; border: 1px solid #807354; border-radius: 10px; background: #212922; box-shadow: none; z-index: auto; }
+.detailPortrait { width: 100%; height: clamp(220px, 30dvh, 320px); overflow: hidden; background: #333b2e; }
+.detailPortrait img { width: 100%; height: 100%; display: block; object-fit: cover; object-position: 50% 15%; }
+.detailContent { padding: 18px; }
+.detailEyebrow { font-size: 12px; letter-spacing: .12em; color: #c7b383; }
+.battleDesign .detailHead { display: flex; align-items: center; justify-content: space-between; margin: 8px 0 12px; color: var(--warn); }
+.detailHead h2 { font-family: Georgia, "Noto Serif TC", serif; font-size: 24px; color: #efe5c9; margin: 0; letter-spacing: .12em; }
+.detailStats { display: grid; grid-template-columns: 1fr 1fr; border-block: 1px solid #555a46; padding: 12px 0; margin-bottom: 12px; color: var(--muted); font-size: 13px; }
+.detailStats strong { margin-left: 7px; color: #efe5c9; font-size: 21px; font-variant-numeric: tabular-nums; }
+.battleDesign .detailAbility { font-size: 13px; line-height: 1.65; margin: 14px 0; }
+.battleDesign .detailAbility b { color: var(--warn); }
+.battleDesign .detailAbility ul { padding-left: 18px; margin: 5px 0 0; }
+.battleDesign .detailMeta { font-size: 12px; color: var(--muted); line-height: 1.8; }
+.detailPlaceholder { display: flex; height: 100%; min-height: 240px; flex-direction: column; justify-content: center; text-align: center; padding: 28px; background: radial-gradient(ellipse at 50% 30%, #3b4431, #202923 65%); }
+.detailPlaceholder h2 { font-family: Georgia, "Noto Serif TC", serif; font-size: 24px; line-height: 1.65; }
+.detailPlaceholder p { color: var(--muted); line-height: 1.9; font-size: 14px; }
+.confirmationPanel { display: grid; grid-template-rows: 54px 62px; gap: 10px; padding: 8px 0; }
+.selectionStatus { height: 54px; min-height: 54px; overflow-y: auto; line-height: 1.65; font-size: 13px; color: #e4cf9e; padding: 7px 10px; border: 1px solid #565d47; border-radius: 7px; background: #283025; }
+.confirmActions { display: grid; grid-template-columns: 70px minmax(0,1fr); gap: 8px; }
+.battleDesign .confirmActions .btn { min-width: 0; height: 62px; white-space: normal; padding: 6px; }
+.battleDesign .confirmPrimary { color: #17251e; background: #d4b57b; border-color: #e7cf9b; font-size: 15px; }
+.battleDesign .confirmPrimary:hover:not(:disabled) { background: #e2c792; }
+.battleDesign .confirmPrimary .buttonReason { display: none; }
+.battleDesign .overlayBox, .battleDesign .logDrawerPanel { background: #1e2926; border-color: #65705c; color: var(--text); }
+.battleDesign .rulesBody { color: var(--text); }
+.battleDesign .logDrawer .log { background: #17221f; border-color: #4c594a; }
+.battleDesign #unitDialog { width: min(92vw, 500px); max-height: 85dvh; color: var(--text); background: #1e2926; border: 1px solid #897a59; border-radius: 12px; padding: 14px; overflow-y: auto; }
+.battleDesign #unitDialog::backdrop { background: #08110edb; }
+.battleDesign #unitDialog .rulesHead { margin-bottom: 12px; }
+.battleDesign #unitDialog h2 { font-size: 20px; }
+.battleDesign .lobbyScreen { background: radial-gradient(ellipse at top left, #28332a, #141b1b 70%); }
+.battleDesign .lobbySection, .battleDesign .roomCard, .battleDesign .seatedRoomCard { border-color: #505c4b; background: #202a25; }
+.battleDesign .lobbyInput { background: #17211d; border-color: #5b6855; color: var(--text); }
+@media (min-width: 1450px) {
+  .battleLayout { grid-template-columns: minmax(160px,242px) minmax(480px,720px) minmax(300px,432px); gap: 36px; justify-content: center; }
+  .battleDesign .battlefield { padding-inline: 36px; }
+}
+@media (max-width: 1100px) {
+  .battleDesign .battlefield { padding: 14px 20px 26px; }
+  .battleLayout { grid-template-columns: minmax(360px,1fr) 290px; gap: 22px; }
+  .battleSidebar { display: none; }
+  .battleBrand > span { display: none; }
+  .battleDesign .selfBand.turnSection { grid-template-columns: 38px minmax(64px,1fr) minmax(96px,auto); grid-template-rows: 42px 18px 66px; }
+  .battleDesign .selfBand .turnActions { grid-column: 1 / -1; grid-row: 3; }
+}
+@media (max-width: 760px) {
+  .battleDesign .battlefield { max-width: 560px; padding: 10px 12px calc(18px + env(safe-area-inset-bottom)); }
+  .battleDesign .battleTop { min-height: 48px; gap: 6px; padding-bottom: 10px; margin-bottom: 12px; flex-wrap: nowrap; }
+  .battleBrand { gap: 4px; }
+  .battleBrand h1 { font-size: 19px; letter-spacing: .06em; }
+  .battleBrand > .weaponIcon { display: none; }
+  .battleTools { gap: 5px; }
+  .battleDesign .battleTools .btn { font-size: 12px; padding: 6px 8px; }
+  .battleDesign .matchMenuSummary { min-width: 74px; }
+  .battleLayout { grid-template-columns: minmax(0,1fr); gap: 10px; }
+  .battleDesign .playerBand { grid-template-columns: 34px minmax(64px,1fr) 32px 32px 62px; gap: 8px; padding: 8px 10px; min-height: 58px; }
+  .battleDesign .playerAvatar, .battleDesign .selfBand .playerAvatar { width: 34px; height: 34px; font-size: 11px; }
+  .battleDesign .bandIdentity strong { font-size: 14px; }
+  .battleDesign .bandIdentity > span { font-size: 10px; }
+  .battleDesign .bandStat > strong { font-size: 16px; }
+  .battlePhase { height: 26px; min-height: 26px; font-size: 11px; }
+  .battleDesign .boardWrap { padding: 14px; border-radius: 6px; }
+  .boardCoordinates.columns { top: 1px; left: 14px; right: 14px; font-size: 9px; }
+  .boardCoordinates.rows { top: 14px; bottom: 14px; left: 1px; width: 10px; font-size: 9px; }
+  .battleDesign .unit, .battleDesign .unit.p1, .battleDesign .unit.p2 { width: 87%; height: 87%; border-width: 1.5px; }
+  .battleDesign .unit .stars { font-size: 7px; }
+  .battleDesign .unitIcon { width: 43%; height: 43%; }
+  .battleDesign .hpbar { height: 3px; bottom: 12%; }
+  .battleDesign .selfBand.turnSection { grid-template-columns: 34px minmax(64px,1fr) minmax(96px,auto); grid-template-rows: 34px 16px 60px; gap: 4px 8px; padding: 8px 10px; margin-top: 10px; }
+  .battleDesign .selfBand .bandTurn { grid-row: 1; grid-column: 3; gap: 6px; }
+  .battleDesign .bandTurn .turn { font-size: 14px; }
+  .battleDesign .turnTimer { font-size: 21px; }
+  .battleDesign .selfBand .selfResources { grid-row: 2; grid-column: 2 / 4; }
+  .battleDesign .selfBand .turnActions { grid-row: 3; grid-column: 1 / -1; gap: 8px; }
+  .battleDesign .selfBand .artBtn, .battleDesign .selfBand .endTurnBtn { height: 60px; padding: 6px; font-size: 14px; }
+  .battleNotice { height: 46px; min-height: 46px; padding-block: 6px; }
+  .battleDesign .battleNotice .status { font-size: 11px; }
+  .battleDesign .handPanel { min-height: 124px; grid-template-rows: 20px 76px; padding: 8px; gap: 8px; }
+  .battleDesign .hand { height: 76px; min-height: 76px; gap: 6px; }
+  .battleDesign .card { height: 76px; min-height: 76px; padding: 5px 2px; gap: 3px; justify-content: center; }
+  .battleDesign .handPortrait { display: none; }
+  .battleDesign .card > .weaponIcon { display: block; width: 23px; height: 23px; color: #d5c19a; }
+  .battleDesign .card .name { font-size: 13px; }
+  .battleDesign .card .cardTag { font-size: 9px; }
+  .detailRail { position: static; height: auto; min-height: 0; grid-template-rows: 60px 120px; gap: 8px; }
+  .rankControls { display: grid; grid-template-columns: minmax(0,1fr) 78px; gap: 8px; }
+  .battleDesign .rankRow { grid-template-rows: 60px; gap: 6px; }
+  .battleDesign .rankRow > .btn { height: 60px; font-size: 13px; padding: 5px; }
+  .battleDesign #unitDetailBtn { display: block; min-width: 0; white-space: normal; line-height: 1.5; padding: 8px; }
+  .battleDesign .cardDetail, .battleDesign .cardDetail.idle { display: none; }
+  .confirmationPanel { grid-template-rows: 46px 62px; gap: 8px; padding: 0; }
+  .selectionStatus { height: 46px; min-height: 46px; font-size: 12px; padding: 5px 8px; }
+  .confirmActions { grid-template-columns: 78px minmax(0,1fr); }
+  .detailPortrait { height: 300px; }
+}
+@media (max-width: 370px) {
+  .battleDesign .battlefield { padding-inline: 8px; }
+  .battleBrand h1 { font-size: 16px; }
+  .battleDesign .battleTools .btn { padding-inline: 6px; font-size: 11px; }
+  .battleDesign .matchMenuSummary { min-width: 64px; }
+  .battleDesign .playerBand { grid-template-columns: 30px minmax(50px,1fr) 28px 28px 54px; gap: 5px; padding-inline: 8px; }
+  .battleDesign .selfBand.turnSection { grid-template-columns: 30px minmax(50px,1fr) minmax(92px,auto); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .battleDesign *, .battleDesign *::before, .battleDesign *::after { scroll-behavior: auto; }
+  .battleDesign .endTurnBtn.ready:not(:disabled) { animation: none; }
+}

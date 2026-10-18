@@ -106,8 +106,11 @@ function installNearWinFixture(game) {
     await p1Page.locator(".card:not([disabled])").first().click();
     await p1Page.locator(".cell").nth(4).click();
     await waitUntil(() => Boolean(room.game.board[0][4]));
+    await p1Page.locator("#endTurnBtn:not([disabled])").click();
+    await waitUntil(() => room.game.current === 2);
     await p2Page.locator(".card:not([disabled])").first().click();
     await p2Page.locator(".cell").nth(80).click();
+    await p2Page.locator("#endTurnBtn:not([disabled])").click();
     await waitUntil(() => room.game.gameOver);
 
     assert.equal(room.game.winner, 1);
