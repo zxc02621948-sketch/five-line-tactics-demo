@@ -1,5 +1,5 @@
 // /local 單機測試。規則完全來自正式的 game_engine.js，這裡只做操作與顯示。
-// 兩種模式維持原本用途：對電腦（P2 由簡單啟發式代打）與本機雙人（同一台電腦輪流操作）。
+// 兩種模式維持原本用途：對電腦（P2 由策略 AI 代打）與本機雙人（同一台電腦輪流操作）。
 (() => {
   const FiveLine = globalThis.FiveLineEngine;
   const { GameEngine, ALPHA_TURN_ORDER } = FiveLine;
@@ -7,9 +7,6 @@
   const design = globalThis.BattleDesign.mount({ online: false });
   const { NAMES } = UI;
   const $ = selector => document.querySelector(selector);
-  const ORTHO = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-  const LINES = [[1, 0], [0, 1], [1, 1], [1, -1]];
-  const inB = (r, c) => r >= 0 && c >= 0 && r < 9 && c < 9;
 
   let engine = null;
   let mode = "pve";
@@ -20,6 +17,8 @@
   let moveFrom = null;                 // 手牌用盡時，已選好要移動的棋子座標
   let notice = "";
   let aiThinking = false;
+  let aiJob = null;
+  let aiSerial = 0;
   let resigned = null;                 // 棄賽者的 pid；棄賽只影響本機顯示，不動引擎規則
   let resultReportOpen = false;
   let resultOverlayDismissed = false;
@@ -70,6 +69,7 @@
     && engine.legalMoves(engine.current).length > 0;
 
   function reset() {
+    cancelAi();
     // 對電腦與本機雙人都使用正式回合順序：固定 P1 → P2 → combat
     engine = new GameEngine({ roomCode: "LOCAL1", ...ALPHA_TURN_ORDER });
     selectedType = null; selectedRank = 1; hoverType = null;
@@ -91,7 +91,7 @@
     piecesEl: $("#combatPieces"),
     labelEl: $("#combatStepLabel"),
     skipButton: $("#skipCombatBtn"),
-    onFinish: () => render(),
+    onFinish: () => { render(); scheduleAi(); },
   });
 
   function syncCombatCue() {
@@ -408,79 +408,134 @@
     notice = ""; render();
   }
 
-  // ---- 對電腦模式的簡單啟發式（只使用引擎的公開介面）----
-  function scheduleAi() {
-    if (mode !== "pve" || finished() || engine.current !== 2) return;
-    aiThinking = true;
-    render();
-    setTimeout(() => { aiThinking = false; aiMove(); }, 320);
+  // ---- 對電腦：可取消、有時間預算的策略工作 ----
+  const AI_PID = 2;
+  function cancelAi() {
+    const job = aiJob;
+    aiJob = null; aiThinking = false;
+    if (!job) return;
+    job.cancelled = true;
+    clearTimeout(job.timer); clearTimeout(job.watchdog);
+    job.finishWorker?.(null);
+    job.worker?.terminate();
+    job.worker = null;
   }
-
-  function lineScore(r, c, pid) {
-    let score = -(Math.abs(r - 4) + Math.abs(c - 4)) * 0.05;
-    for (const [dr, dc] of LINES) for (let off = -4; off <= 0; off++) {
-      let own = 0, enemy = 0, ok = true;
-      for (let k = 0; k < 5; k++) {
-        const rr = r + dr * (off + k), cc = c + dc * (off + k);
-        if (!inB(rr, cc)) { ok = false; break; }
-        const unit = engine.board[rr][cc];
-        if (unit && unit.pid === pid) own++; else if (unit) enemy++;
+  function aiJobCurrent(job) {
+    return aiJob === job && !job.cancelled && engine === job.engine
+      && engine.matchId === job.matchId && engine.turnId === job.turnId
+      && mode === "pve" && !finished() && engine.current === AI_PID;
+  }
+  function aiSnapshot() {
+    return {
+      pid: AI_PID, matchId: engine.matchId, turnId: engine.turnId, now: Date.now(),
+      board: engine.board.map(row => row.map(unit => unit ? { ...unit } : null)),
+      hand: [...engine.players[AI_PID - 1].hand],
+      artillery: { 1: engine.players[0].artillery, 2: engine.players[1].artillery },
+      roundNo: engine.roundNo, actionsThisRound: engine.actionsThisRound,
+      deploymentCommitted: engine.deploymentCommitted, artilleryUsedThisTurn: engine.artilleryUsedThisTurn,
+      nextUnitId: engine.nextUnitId, overtime: engine.overtime,
+      overtimeStartRound: engine.overtimeStartRound, quietRounds: engine.quietRounds,
+    };
+  }
+  function remainingAiBudget() {
+    return Math.max(0, Math.min(1200, engine.turnClockState(Date.now()).remainingMs - 350));
+  }
+  async function requestAiPlan(job, snapshot) {
+    const budgetMs = remainingAiBudget();
+    if (typeof Worker === "function" && budgetMs > 0) {
+      try {
+        const plan = await new Promise(resolve => {
+          let settled = false;
+          const finish = value => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(job.watchdog);
+            job.worker?.terminate(); job.worker = null; job.finishWorker = null;
+            resolve(value);
+          };
+          job.finishWorker = finish;
+          job.worker = new Worker("/local_ai_worker.js?v=1");
+          job.worker.onmessage = event => {
+            if (event.data?.jobId !== job.id) return;
+            finish(event.data.error ? undefined : event.data.plan);
+          };
+          job.worker.onerror = event => { event.preventDefault(); finish(undefined); };
+          job.worker.onmessageerror = () => finish(undefined);
+          job.watchdog = setTimeout(() => finish(undefined), budgetMs + 250);
+          job.worker.postMessage({ jobId: job.id, snapshot, budgetMs });
+        });
+        if (plan !== undefined || !aiJobCurrent(job)) return plan;
+      } catch {
+        clearTimeout(job.watchdog);
+        job.worker?.terminate(); job.worker = null; job.finishWorker = null;
       }
-      if (!ok || (own && enemy)) continue;
-      if (!enemy) score += own * own * 1.15 + (own === 4 ? 500 : 0);
-      if (!own) score += 0.95 * (enemy * enemy + (enemy === 4 ? 520 : 0));
     }
-    for (const [dr, dc] of ORTHO) {
-      const unit = inB(r + dr, c + dc) && engine.board[r + dr][c + dc];
-      if (unit) score += unit.pid === pid ? 0.25 : 0.4;
-    }
-    return score;
+    // 不支援 worker 時仍使用相同策略；分批讓回主執行緒，不停住倒數和操作。
+    if (!aiJobCurrent(job) || !globalThis.FiveLineAI) return null;
+    return globalThis.FiveLineAI.choose(snapshot, {
+      budgetMs: remainingAiBudget(), isCancelled: () => !aiJobCurrent(job),
+    });
   }
-
-  function aiMove() {
-    if (finished() || engine.current !== 2) { render(); return; }
-    const player = engine.players[1];
-    if (!engine.canDeploy(2)) {
-      const move = engine.legalMoves(2)[0];
-      if (move) engine.move(2, {
-        r: move.from[0], c: move.from[1], toR: move.to[0], toC: move.to[1], turnId: engine.turnId,
-      });
-      engine.endTurn(2, { turnId: engine.turnId });
-      render();
+  function fallbackAiMain() {
+    if (engine.deploymentCommitted) return;
+    if (engine.canDeploy(AI_PID)) {
+      const type = engine.players[AI_PID - 1].hand[0];
+      const rank = GameEngine.deploymentRules().ranks[0].rank;
+      for (let r = 0; r < engine.board.length; r++) for (let c = 0; c < engine.board[r].length; c++) {
+        if (!engine.board[r][c]) {
+          if (engine.deploy(AI_PID, { r, c, type, rank, turnId: engine.turnId }).ok) return;
+        }
+      }
+    } else {
+      const move = engine.legalMoves(AI_PID)[0];
+      if (move) engine.move(AI_PID, { r: move.from[0], c: move.from[1],
+        toR: move.to[0], toC: move.to[1], turnId: engine.turnId });
+    }
+  }
+  function applyAiPlan(job, plan) {
+    if (!aiJobCurrent(job)) return;
+    if (engine.checkTurnTimeout(Date.now())?.ok) {
+      notice = "回合逾時，已自動結束回合。";
       return;
     }
-
-    let best = null, bestScore = -Infinity;
-    for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
-      if (engine.board[r][c]) continue;
-      const score = lineScore(r, c, 2);
-      if (score > bestScore) { bestScore = score; best = [r, c]; }
-    }
-    if (!best) { render(); return; }
-
-    const counts = { sword: 0, shield: 0, spear: 0 };
-    player.hand.forEach(type => counts[type]++);
-    const [r, c] = best;
-    // 選兵種：優先剋制落點附近的敵人
-    let type = player.hand[0], typeScore = -Infinity;
-    for (const candidate of Object.keys(counts).filter(item => counts[item])) {
-      let score = counts[candidate] * 0.05;
-      for (const [dr, dc] of ORTHO) for (let d = 1; d <= 2; d++) {
-        const unit = inB(r + dr * d, c + dc * d) && engine.board[r + dr * d][c + dc * d];
-        if (!unit) continue;
-        if (unit.pid !== 2 && catalog()[candidate].counters === unit.type) score += 2;
-        break;
+    for (const action of plan?.actions || []) {
+      if (!aiJobCurrent(job)) return;
+      if (engine.checkTurnTimeout(Date.now())?.ok) {
+        notice = "回合逾時，已自動結束回合。"; return;
       }
-      if (score > typeScore) { typeScore = score; type = candidate; }
+      const intent = { ...action, turnId: job.turnId };
+      let result;
+      if (action.kind === "deploy") result = engine.deploy(AI_PID, intent);
+      else if (action.kind === "move") result = engine.move(AI_PID, intent);
+      else if (action.kind === "artillery") result = engine.artillery(AI_PID, intent);
+      else break;
+      if (!result.ok) break;
     }
-    const eliteOut = engine.board.flat()
-      .some(unit => unit && unit.pid === 2 && unit.rank === 2 && unit.type === type);
-    const rank = counts[type] >= 3 && !eliteOut && Math.random() < 0.5 ? 2 : 1;
-
-    const result = engine.deploy(2, { r, c, type, rank, turnId: engine.turnId });
-    if (!result.ok) engine.deploy(2, { r, c, type, rank: 1, turnId: engine.turnId });
-    engine.endTurn(2, { turnId: engine.turnId });
-    render();
+    if (!aiJobCurrent(job)) return;
+    fallbackAiMain();
+    if (engine.checkTurnTimeout(Date.now())?.ok) {
+      notice = "回合逾時，已自動結束回合。"; return;
+    }
+    const result = engine.endTurn(AI_PID, { turnId: job.turnId });
+    notice = result.ok ? "" : result.error;
+  }
+  function scheduleAi() {
+    if (mode !== "pve" || finished() || engine.current !== AI_PID || aiJob
+      || pendingCombat || combatPlayback.active()) return;
+    const job = { id: ++aiSerial, engine, matchId: engine.matchId, turnId: engine.turnId, cancelled: false };
+    aiJob = job; aiThinking = true; render();
+    job.timer = setTimeout(async () => {
+      if (!aiJobCurrent(job)) return;
+      let plan = null;
+      try { plan = await requestAiPlan(job, aiSnapshot()); }
+      catch { /* 策略工作失敗時，正式引擎仍會驗證備用行動。 */ }
+      if (!aiJobCurrent(job)) return;
+      applyAiPlan(job, plan);
+      if (aiJob !== job) return;
+      cancelAi();
+      render();
+      if (engine.turnId !== job.turnId) scheduleAi();
+    }, 220);
   }
 
   // ---- 綁定 ----
@@ -515,6 +570,7 @@
   $("#resignBtn").onclick = () => {
     if (!started() || finished()) return;
     // 只在本機顯示層結束對局，不修改 game_engine.js 的規則
+    cancelAi();
     resigned = mode === "pve" ? 1 : engine.current;
     artilleryMode = false; selectedType = null; hoverType = null;
     notice = mode === "pve" ? "你已棄賽。" : `P${resigned} 結束了本局。`;
@@ -541,11 +597,16 @@
     if (!engine || finished()) { updateTurnTimer(); return; }
     const result = engine.checkTurnTimeout(Date.now());
     if (result?.ok) {
+      cancelAi();
       notice = "回合逾時，已自動結束回合。";
       artilleryMode = false; selectedType = null; moveFrom = null;
       render();
       scheduleAi();
     } else updateTurnTimer();
   }, 250);
+  globalThis.addEventListener("pagehide", cancelAi);
+  globalThis.addEventListener("pageshow", event => {
+    if (event.persisted) { render(); scheduleAi(); }
+  });
   reset();
 })();
