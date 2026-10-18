@@ -6,6 +6,7 @@
   const ART = Object.freeze({
     sword: "/assets/units/sword-v1.png", shield: "/assets/units/shield-v1.png",
     spear: "/assets/units/spear-v1.png", elite_sword: "/assets/units/elite-sword-v1.png",
+    elite_shield: "/assets/units/elite-shield-v1.png", elite_spear: "/assets/units/elite-spear-v1.png",
   });
   const SHAPES = Object.freeze({
     sword: '<path d="M22 1 27 0 28 6 14 23 10 19Z" fill="currentColor"/><path d="m5 19 11 10M8 24 2 31" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>',
@@ -13,7 +14,7 @@
     spear: '<path d="M27 0 29 11 22 10Z" fill="currentColor"/><path d="M24 10 4 31" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="m22 12-7-1 3 8" fill="currentColor" opacity=".5"/>',
   });
   const icon = type => `<svg class="weaponIcon" viewBox="0 0 32 32" aria-hidden="true">${SHAPES[type] || ""}</svg>`;
-  const portrait = (type, rank) => ART[type === "sword" && rank === 2 ? "elite_sword" : type] || "";
+  const portrait = (type, rank) => ART[rank === 2 ? `elite_${type}` : type] || ART[type] || "";
   function setButton(button, label, reason = "") {
     const strong = document.createElement("strong"); strong.textContent = label;
     const small = document.createElement("span"); small.className = "buttonReason"; small.textContent = reason;

@@ -35,6 +35,8 @@ const STATIC_FILES = new Map([
   ["/assets/units/shield-v1.png", ["assets/units/shield-v1.png", "image/png"]],
   ["/assets/units/spear-v1.png", ["assets/units/spear-v1.png", "image/png"]],
   ["/assets/units/elite-sword-v1.png", ["assets/units/elite-sword-v1.png", "image/png"]],
+  ["/assets/units/elite-shield-v1.png", ["assets/units/elite-shield-v1.png", "image/png"]],
+  ["/assets/units/elite-spear-v1.png", ["assets/units/elite-spear-v1.png", "image/png"]],
   ["/game_shell.css", ["game_shell.css", "text/css; charset=utf-8"]],
   ["/local_layout.css", ["local_layout.css", "text/css; charset=utf-8"]],
   ["/online_layout.css", ["online_layout.css", "text/css; charset=utf-8"]],
