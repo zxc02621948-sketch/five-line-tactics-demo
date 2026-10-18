@@ -8,10 +8,13 @@ const path = require("node:path");
 const { GameEngine, baseStats } = require("../game_engine");
 
 const read = name => fs.readFileSync(path.join(__dirname, "..", name), "utf8");
-const html = read("alpha.html");
+const battlefield = read("battlefield.js");
+const designCss = read("battlefield.css");
+const sharedMarkup = battlefield.match(/host\.innerHTML = `([\s\S]*?)`;/)[1];
+const html = read("alpha.html") + sharedMarkup;
 const client = read("alpha_client.js");
 const css = read("alpha_board.css");
-const localHtml = read("index.html");
+const localHtml = read("index.html") + sharedMarkup;
 const localClient = read("local_client.js");
 const sharedUi = read("alpha_ui.js");
 const shellCss = read("game_shell.css");
@@ -42,7 +45,7 @@ function bench() {
 test("連線入口直接進入大廳，並保留單機與規則入口", () => {
   assert.match(html, /id="lobbyScreen"/);
   assert.match(html, /id="roomDirectory"[\s\S]*?等待中的房間/);
-  assert.match(html, /class="btn modeLink" href="\/local">🎮 單機測試/);
+  assert.match(html, /class="btn modeLink" href="\/local">單機對局/);
   assert.match(html, /id="entryHelpBtn"[\s\S]*?規則/);
   assert.doesNotMatch(html, /id="entryOverlay"/);
   assert.match(server, /\["\/", \["alpha\.html"/);
@@ -50,10 +53,10 @@ test("連線入口直接進入大廳，並保留單機與規則入口", () => {
 });
 
 test("兩種模式都不再標示為舊版原型", () => {
-  assert.match(localHtml, /class="btn modeLink" href="\/">🌐 連線對戰/);
+  assert.match(localHtml, /class="btn modeLink" href="\/">連線大廳/);
   assert.doesNotMatch(localHtml, /舊版原型|舊版規則/);
   assert.doesNotMatch(html, /舊版原型|舊版規則/);
-  assert.match(html, /<script src="\/game_engine\.js"><\/script>/);
+  assert.match(html, /<script src="\/game_engine\.js(?:\?v=[^"]+)?"><\/script>/);
 });
 
 test("連線大廳有房間列表、建立、房號加入、複製與離開", () => {
@@ -83,8 +86,8 @@ test("大廳、對局與結算畫面分離，所有 client selector 都有對應
 
 test("單機與連線都載入同一份 game_engine.js 與共用顯示層", () => {
   for (const [label, page] of [["alpha.html", html], ["index.html", localHtml]]) {
-    assert.match(page, /<script src="\/game_engine\.js"><\/script>/, `${label} 缺少 game_engine.js`);
-    assert.match(page, /<script src="\/alpha_ui\.js"><\/script>/, `${label} 缺少 alpha_ui.js`);
+    assert.match(page, /<script src="\/game_engine\.js(?:\?v=[^"]+)?"><\/script>/, `${label} 缺少 game_engine.js`);
+    assert.match(page, /<script src="\/alpha_ui\.js(?:\?v=[^"]+)?"><\/script>/, `${label} 缺少 alpha_ui.js`);
   }
   for (const route of ["/game_engine.js", "/alpha_ui.js", "/local_client.js"]) {
     assert.ok(server.includes(`["${route}"`), `server 缺少 ${route} 路由`);
@@ -105,8 +108,8 @@ test("/local 不再含★★★，全站也不出現", () => {
     ["index.html", localHtml], ["local_client.js", localClient], ["alpha_ui.js", sharedUi]]) {
     assert.doesNotMatch(stripComments(text), /★★★/, `${label} 不應出現 ★★★`);
   }
-  assert.match(client, /for \(const \[rank, cost\] of \[\[1, 1\], \[2, 3\]\]\)/);
-  assert.match(localClient, /for \(const \[rank, cost\] of \[\[1, 1\], \[2, 3\]\]\)/);
+  assert.deepEqual(GameEngine.deploymentRules().ranks.map(option => [option.rank, option.cost]), [[1, 1], [2, 3]]);
+  assert.match(battlefield, /view\.deploymentRules\.ranks/);
 });
 
 test("/local 不再自己實作規則，只呼叫正式引擎", () => {
@@ -208,23 +211,19 @@ test("單機也受同兵種★★唯一限制，且被擋時仍可出★", () =>
 /* ---------------- 說明內容 ---------------- */
 
 test("單機與連線的兵種說明來自同一個共用模組", () => {
-  // 文案只定義在 alpha_ui.js，兩個 client 都不得自帶一份
   assert.match(sharedUi, /const ELITE_ABILITY = \{/);
-  for (const [label, text] of [["alpha_client.js", client], ["local_client.js", localClient]]) {
-    assert.doesNotMatch(text, /const ELITE_ABILITY|const ABILITY = |function rulesHtml/, `${label} 不應自帶文案`);
-    assert.match(text, /UI\.renderCardDetail\(/, `${label} 必須使用共用的詳情`);
-    assert.match(text, /UI\.wireRulesOverlay\(/, `${label} 必須使用共用的規則視窗`);
-    assert.match(text, /UI\.handCardHtml\(/, `${label} 必須使用共用的手牌小卡`);
+  assert.match(battlefield, /UI\.renderCardDetail\(/);
+  for (const text of [client, localClient]) {
+    assert.doesNotMatch(text, /const ELITE_ABILITY|function rulesHtml/);
+    assert.match(text, /design\.detail\(/);
+    assert.match(text, /UI\.wireRulesOverlay\(/);
+    assert.match(text, /design\.renderHand\(/);
   }
 });
 
 test("主畫面與單機都固定顯示三兵相剋且方向正確", () => {
-  for (const [label, page] of [["alpha.html", html], ["index.html", localHtml]]) {
-    const hint = page.match(/<span class="pill counterHint"[\s\S]*?<\/span>/);
-    assert.ok(hint, `${label} 找不到相剋提示`);
-    assert.match(hint[0], /盾[\s\S]*?→[\s\S]*?劍[\s\S]*?→[\s\S]*?槍[\s\S]*?→[\s\S]*?盾/);
-    assert.match(hint[0], /title="盾克劍、劍克槍、槍克盾"/);
-  }
+  assert.match(battlefield, /id="counterLegend"/);
+  assert.match(battlefield, /UI\.NAMES\[info\.counters\]/);
   const catalog = GameEngine.unitCatalog();
   assert.equal(catalog.shield.counters, "sword");
   assert.equal(catalog.sword.counters, "spear");
@@ -234,7 +233,7 @@ test("主畫面與單機都固定顯示三兵相剋且方向正確", () => {
 test("規則視窗可開可關，且不重置房間或對局", () => {
   for (const page of [html, localHtml]) {
     assert.match(page, /id="rulesOverlay"[^>]*class="overlay hidden"/);
-    assert.match(page, /id="helpBtn"[\s\S]*?？ 規則/);
+    assert.match(page, /id="helpBtn"[^>]*>規則/);
   }
   const wiring = sharedUi.match(/function wireRulesOverlay\(getCatalog\)[\s\S]*?\n  }/)[0];
   assert.doesNotMatch(wiring, /send\(|roomCode\s*=|localStorage|new GameEngine/);
@@ -285,8 +284,10 @@ test("三種★★說明與正式規則一致", () => {
 });
 
 test("★★盾在小卡與詳情都標示為不主動攻擊", () => {
-  assert.match(sharedUi, /ranks\[2\]\.attacks \? String\(ranks\[2\]\.atk\) : "—"/);
-  assert.match(sharedUi, /"—（不主動攻擊）"/);
+  const detail = AlphaUI.cardDetailHtml("shield", GameEngine.unitCatalog(), 2);
+  assert.match(detail, /攻擊 <strong>—<\/strong>/);
+  assert.match(detail, /不主動攻擊/);
+  assert.match(AlphaUI.handCardHtml("shield", GameEngine.unitCatalog()), /攻—/);
 });
 
 test("手牌小卡顯示兵種、星級、HP、ATK 與簡短能力標籤", () => {
@@ -297,78 +298,42 @@ test("手牌小卡顯示兵種、星級、HP、ATK 與簡短能力標籤", () =>
 });
 
 test("卡牌詳情不破壞原本的選牌與部署流程", () => {
-  for (const [label, text] of [["alpha_client.js", client], ["local_client.js", localClient]]) {
-    assert.match(text, /button\.onclick = \(\) => \{ selectedType = type; selectedRank = 1; artilleryMode = false; render\(\); \};/,
-      `${label} 的點擊必須維持只做選牌`);
-    const hover = text.match(/button\.addEventListener\("mouseenter".*/)[0];
-    assert.doesNotMatch(hover, /selectedType/, `${label} 的 hover 不得改變已選卡`);
+  for (const text of [client, localClient]) {
+    const selection = text.match(/onSelect: type => \{[\s\S]*?\n      \}/)[0];
+    assert.match(selection, /selectedType = type; selectedRank = 1; artilleryMode = false/);
+    assert.doesNotMatch(selection, /sendIntent|engine\.deploy/);
+    assert.match(text, /design\.setDraft\(\{ kind: "deploy"/);
+    assert.match(text, /function confirmAction\(intent\)/);
   }
-  for (const page of [html, localHtml]) {
-    assert.match(page, /<div id="cardDetail" class="cardDetail idle"><\/div>/, "詳情卡初始必須是隱藏且無內容");
-  }
+  assert.match(battlefield, /card\.onmouseenter = \(\) => onInspect\(type\)/);
+  assert.match(battlefield, /clearDraft\(\); tone\(\); onSelect\(type\)/);
 });
 
 test("版面不得跳動：會變動內容的區塊都有固定尺寸或不佔版面", () => {
-  // name 形如 ".cardDetail"；取出該 selector 的整段宣告
-  const rule = name => {
-    const match = css.match(new RegExp("\\" + name + "\\s*\\{[^}]*\\}"));
-    assert.ok(match, `alpha_board.css 找不到 ${name} 的樣式`);
-    return match[0];
-  };
-
-  // 1. 詳情大卡必須完全不參與版面流，出現與消失都不推擠棋盤
-  const detail = rule(".cardDetail");
-  assert.match(detail, /position:\s*absolute/, "詳情卡必須 absolute，才不會撐開手牌區");
-  assert.match(detail, /width:\s*\d+px/, "詳情卡寬度必須固定");
-  assert.match(detail, /height:\s*\d+px/, "詳情卡高度必須固定，內容多寡不得改變尺寸");
-  assert.match(detail, /overflow:\s*auto/, "內容超出時應內部捲動而非撐高");
-  assert.match(css, /\.cardDetail\.idle\s*\{\s*display:\s*none/, "沒有目標時必須整張隱藏");
-
-  // 2. 星級選擇列永遠佔位；選牌前後高度不變
-  assert.match(rule(".rankRow"), /min-height:\s*\d+px/, "星級列必須預留固定高度");
-
-  // 3. 手牌小卡尺寸固定，不同兵種不得造成列高變化
-  const card = rule(".card");
-  assert.match(card, /width:\s*\d+px/);
-  assert.match(card, /height:\s*\d+px/);
-
-  // 4. 定位基準存在，且不得裁切浮出的大卡
-  for (const [label, page] of [["alpha.html", html], ["index.html", localHtml]]) {
-    assert.match(page, /class="[^"]*handPanel[^"]*"/, `${label} 需要 handPanel 作為定位基準`);
-  }
-  assert.match(css, /\.handPanel\s*\{[^}]*position:\s*relative/);
-  assert.doesNotMatch(localHtml, /\.handPanel\{[^}]*overflow:\s*hidden/, "handPanel 不得裁切浮出的大卡");
-
-  // 5. 棋盤尺寸不得依賴手牌區高度的魔術數字
-  assert.doesNotMatch(localHtml, /calc\(100vh - 230px\)/, "棋盤不應再用寫死的視窗高度推算");
+  assert.match(designCss, /\.detailRail\s*\{[^}]*grid-template-rows:\s*76px minmax\(0,1fr\) 140px/);
+  assert.match(designCss, /\.battleDesign \.cardDetail[^}]*position:\s*static[^}]*overflow-y:\s*auto/);
+  assert.match(designCss, /\.battleDesign \.hand\s*\{[^}]*height:\s*128px/);
+  assert.match(designCss, /\.battleDesign \.card\s*\{[^}]*height:\s*128px/);
+  assert.match(designCss, /\.selectionStatus\s*\{[^}]*height:\s*54px/);
+  assert.match(battlefield, /id="unitDialog"/);
 });
 
 test("觸控裝置不依賴 hover：點選手牌即可看到同一份詳情", () => {
   for (const text of [client, localClient]) {
-    const start = text.indexOf("function renderHand()");
-    const end = text.indexOf("function renderCardDetail()");
-    assert.ok(start > 0 && end > start);
-    assert.match(text.slice(start, end), /renderCardDetail\(\);/);
-    // 觸控沒有 hover，selectedType 是它唯一的後備來源
-    assert.match(text, /matchMedia\("\(hover: none\)"\)/);
-    assert.match(text, /hoverType \|\| \(noHover \? selectedType : null\)/);
+    assert.match(text, /hoverType \|\| selectedType/);
+    assert.match(text, /design\.detail\(/);
   }
+  assert.match(battlefield, /unitDetailBtn"\)\.onclick/);
+  assert.match(battlefield, /unitDialogBody"\)\.innerHTML = \$\("cardDetail"\)\.innerHTML/);
+  assert.match(battlefield, /dialog\.showModal\(\)/);
 });
 
 test("有 hover 的裝置上，選取手牌不會把大卡釘住擋住棋盤", () => {
-  for (const [name, text] of [["local_client.js", localClient], ["alpha_client.js", client]]) {
-    // 不可以無條件用 selectedType——那會讓大卡在選完牌後一直蓋在棋盤上
-    assert.doesNotMatch(text, /hoverType \|\| selectedType/,
-      `${name} 選取後不得無條件顯示大卡`);
-  }
-  assert.match(client, /canAct:\s*state\?\.canAct/,
-    "連線端結束回合判斷必須讀伺服器狀態，不自行複製引擎規則");
-  // 大卡是疊在棋盤上的 absolute 浮層，無論如何都不能吃掉點擊
-  const block = css.match(/^\.cardDetail\s*\{[\s\S]*?\}/m);
-  assert.ok(block, "找不到 .cardDetail 樣式");
-  assert.match(block[0], /position:\s*absolute/);
-  assert.match(block[0], /pointer-events:\s*none/,
-    "純資訊浮層必須讓點擊穿透，否則會擋住落子");
+  // 大卡已搬到獨立側欄；手機使用原生 dialog，均不覆蓋桌機棋盤。
+  assert.match(battlefield, /<aside class="detailRail">/);
+  assert.match(designCss, /\.battleDesign \.cardDetail[^}]*position:\s*static/);
+  assert.match(designCss, /@media \(max-width:\s*760px\)[\s\S]*?\.battleDesign \.cardDetail[^}]*display:\s*none/);
+  assert.match(client, /canAct:\s*state\?\.canAct/);
 });
 
 test("engine 提供權威數值給 UI，前端不自行硬編數值", () => {
@@ -471,9 +436,9 @@ test("單機與連線共用棋盤外殼，連線端另有大廳與玩家帶版�
 
 test("兩個模式都有直接前往對方的按鈕", () => {
   // 單機 → 連線
-  assert.match(localHtml, /class="btn modeLink" href="\/">🌐 連線對戰/);
+  assert.match(localHtml, /class="btn modeLink" href="\/">連線大廳/);
   // 連線 → 單機
-  assert.match(html, /class="btn modeLink" href="\/local">🎮 單機測試/);
+  assert.match(html, /class="btn modeLink" href="\/local">單機對局/);
 });
 
 test("對局進行中隱藏模式切換，但「重開」永遠留著", () => {
@@ -493,23 +458,16 @@ test("對局進行中隱藏模式切換，但「重開」永遠留著", () => {
 });
 
 test("手牌用盡時 UI 提供移動，不要求玩家手動解死局", () => {
-  // 能不能行動一律問引擎，前端不自己判斷
-  assert.match(localClient, /const canAct = \(\)[\s\S]{0,120}engine\.canAct\(engine\.current\)/);
+  assert.match(localClient, /engine\.canAct\(engine\.current\)/);
   assert.match(localClient, /engine\.legalMoves\(engine\.current\)/);
-  assert.match(localClient, /engine\.move\(engine\.current, \{ r: fr, c: fc, toR: r, toC: c/);
-  // 兩段式操作：先點自己的棋、再點相鄰空格
-  assert.match(localClient, /請先點自己的一顆棋，再點相鄰空格|點自己的一顆棋，再點相鄰空格/);
-  assert.match(localClient, /點上下左右相鄰的空格移動/);
-  // 規則說明要講清楚這是替代行動
-  assert.match(sharedUi, /手牌用盡時/);
-  assert.match(sharedUi, /移動自己的一顆棋/);
-  assert.match(sharedUi, /自動跳過<\/b>，不判輸/);
-  // 舊的死局文案與已移除的終局原因都不該再出現
-  assert.doesNotMatch(localClient, /目前規則沒有這個局面的解法/);
-  assert.doesNotMatch(localClient, /補給耗盡/);
-  assert.doesNotMatch(sharedUi, /補給同時耗盡|棋盤已滿：本局平手/);
-  // 連線端要送得出 move
+  for (const text of [client, localClient]) {
+    assert.match(text, /design\.setDraft\(\{ kind: "move", r: moveFrom\[0\], c: moveFrom\[1\], toR: r, toC: c/);
+    assert.match(text, /legalMoves/);
+  }
+  assert.match(localClient, /engine\[method\]\(engine\.current, \{ \.\.\.intent, turnId: engine\.turnId \}\)/);
   assert.match(server, /intent\.kind === "move"[\s\S]{0,60}room\.game\.move/);
+  assert.match(sharedUi, /手牌用盡時/);
+  assert.match(sharedUi, /自動跳過<\/b>，不判輸/);
 });
 
 test("沒牌時改用移動，引擎不會留下「不能行動但 gameOver 為 false」的局面", () => {
@@ -527,16 +485,19 @@ test("沒牌時改用移動，引擎不會留下「不能行動但 gameOver 為 
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!engine.board[r][c]) empties.push([r, c]);
         const [r, c] = empties[rnd(empties.length)];
         const hand = engine.players[pid - 1].hand;
-        if (!engine.deploy(pid, { r, c, type: hand[0], rank: 1, turnId: engine.turnId }).ok) break;
+        assert.equal(engine.deploy(pid, { r, c, type: hand[0], rank: 1, turnId: engine.turnId }).ok, true);
+        assert.equal(endTurn(engine, pid).ok, true);
         continue;
       }
       const moves = engine.legalMoves(pid);
       // 引擎會自動跳過沒有合法移動的一方，所以這裡不該看到「輪到一個動不了的人」
       if (!moves.length) return { engine, stuck: !engine.gameOver };
       const pick = moves[rnd(moves.length)];
-      if (!engine.move(pid, { r: pick.from[0], c: pick.from[1],
-        toR: pick.to[0], toC: pick.to[1], turnId: engine.turnId }).ok) break;
+      assert.equal(engine.move(pid, { r: pick.from[0], c: pick.from[1],
+        toR: pick.to[0], toC: pick.to[1], turnId: engine.turnId }).ok, true);
+      assert.equal(endTurn(engine, pid).ok, true);
     }
+    assert.ok(guard <= 400, "200 個種子測試必須實際推進回合並結束，不能提前中止");
     return { engine, stuck: false };
   };
   const stuck = [];
@@ -550,7 +511,7 @@ test("棄賽會結束對局且不修改引擎規則", () => {
   assert.match(localClient, /\$\("#resignBtn"\)\.onclick/);
   assert.match(localClient, /const finished = \(\) => Boolean\(resigned\)/);
   // AI 與玩家在棄賽後都不能再行動
-  assert.match(localClient, /if \(mode !== "pve" \|\| finished\(\) \|\| engine\.current !== 2\) return;/);
+  assert.match(localClient, /mode === "pve" && !finished\(\) && engine\.current === AI_PID/);
   assert.match(localClient, /const humanTurn = \(\) => engine && !finished\(\)/);
   // 棄賽只改本機顯示狀態，不得動到引擎的勝負欄位
   const handler = localClient.match(/\$\("#resignBtn"\)\.onclick[\s\S]*?\n  \};/)[0];
@@ -604,13 +565,14 @@ test("指示層疊在棋盤上但不吃點擊、不參與版面", () => {
 });
 
 test("兩個 client 都掛上 hover 預演，且離開會清除", () => {
-  for (const [label, text] of [["alpha_client.js", client], ["local_client.js", localClient]]) {
-    assert.match(text, /cell\.addEventListener\("mouseenter", \(\) => \{ hoverCell = \[r, c\]; renderForecast\(\); \}\)/, `${label} 缺少 hover`);
-    assert.match(text, /cell\.addEventListener\("mouseleave", \(\) => \{ hoverCell = null; renderForecast\(\); \}\)/, `${label} 缺少清除`);
+  for (const text of [client, localClient]) {
+    assert.match(text, /onHover: cell => \{ hoverCell = cell; renderForecast\(\); \}/);
     assert.match(text, /function renderForecast\(\)/);
-    // 空格要能預演「放下去會怎樣」
-    assert.match(text, /ghost = \{ r, c, unit:/, `${label} 缺少落子預演`);
+    assert.match(text, /layer\.innerHTML = ""/);
+    assert.match(text, /draft\?\.kind === "artillery"/);
   }
+  assert.match(battlefield, /cell\.onmouseenter = \(\) => boardCallbacks\.onHover\?\.\(\[r, c\]\)/);
+  assert.match(battlefield, /cell\.onmouseleave = \(\) => boardCallbacks\.onHover\?\.\(null\)/);
 });
 
 test("靜態資源在 alpha 期間不得被快取", () => {
@@ -660,7 +622,7 @@ test("炮擊預覽會區分敵我並清乾淨", () => {
   assert.match(css, /\.artCell\.ally\s*\{/);
   assert.match(css, /\.artCell\.foe\s*\{/);
   // 移開瞄準格時統計要一起清掉，不能留著舊數字
-  assert.match(localClient, /if \(artilleryPlan\) \{ artilleryPlan = null; updateStatusText\(\); \}/);
+  assert.match(localClient, /layer\.innerHTML = "";\s*artilleryPlan = null;/);
 });
 
 test("規則視窗必須說明加賽與消極判負，且不自己抄數值", () => {
@@ -741,38 +703,20 @@ test("matchPhaseLabel 實際執行：回傳 { text, full, level } 且倒數正�
 });
 
 test("警示條有固定佔位，不會因出現或消失擠壓其他元件", () => {
-  for (const [name, page] of [["index.html", localHtml], ["alpha.html", html]]) {
-    assert.match(page, /<div id="phaseBadge" class="phaseBadge"><\/div>/, `${name} 需要警示條`);
-  }
-  // turnSection 是固定列高的 grid，警示條必須是其中一列而不是動態插入
-  const block = layoutCss.match(/\.turnSection\s*\{[\s\S]*?\}/);
-  assert.ok(block, "找不到 .turnSection 樣式");
-  const rows = stripComments(block[0].replace(/\/\*[\s\S]*?\*\//g, ""))
-    .match(/grid-template-rows:\s*([^;]+);/);
-  assert.ok(rows, "turnSection 必須用固定列高");
-  // minmax(0, 1fr) 內部有空格，先把括號裡的空白收掉才數得對
-  const tracks = rows[1].trim().replace(/\([^)]*\)/g, m => m.replace(/\s+/g, "")).split(/\s+/);
-  assert.equal(tracks.length, 8,
-    `警示條與結束回合都有固定列，共 8 列，實際是「${rows[1].trim()}」`);
-  assert.equal(tracks[2], "22px", "警示條那一列要有固定高度");
-  // 空的時候完全透明，不畫空盒子
-  assert.match(layoutCss, /\.phaseBadge\s*\{[^}]*background:\s*transparent[^}]*\}/s);
-  assert.match(layoutCss, /\.phaseBadge\.danger\s*\{/);
-  // 警示不可以塞回會被截斷的 turnText
-  for (const [name, text] of [["local_client.js", localClient], ["alpha_client.js", client]]) {
-    assert.match(text, /#phaseBadge/, `${name} 必須寫進警示條`);
-    assert.doesNotMatch(text, /turnText"\)\.textContent[^;]*phase\.text/,
-      `${name} 不可以把警示塞進 nowrap+ellipsis 的 turnText`);
+  assert.match(battlefield, /id="phaseBadge" class="phaseBadge"/);
+  assert.match(designCss, /\.battlePhase\s*\{[^}]*height:\s*30px;\s*min-height:\s*30px/);
+  assert.match(designCss, /\.battleDesign \.phaseBadge\s*\{[^}]*height:\s*24px/);
+  for (const text of [client, localClient]) {
+    assert.match(text, /#phaseBadge/);
+    assert.doesNotMatch(text, /turnText"\)\.textContent[^;]*phase\.text/);
   }
 });
 
 test("連線端也要能移動，而且規則參數來自 server 送的 state", () => {
-  assert.match(client, /function moveMode\(\)/);
-  assert.match(client, /state\.own\.hand\.length > 0/, "有手牌時不進入移動模式");
-  assert.match(client, /sendIntent\(\{ kind: "move", r: fr, c: fc, toR: r, toC: c \}\)/);
-  // 收到新 state 要清掉暫存的移動起點，否則會拿舊座標送出
+  const moveMode = client.match(/function moveMode\(\)[\s\S]*?\n  }/)[0];
+  assert.match(moveMode, /!state\.deploymentCommitted && state\.legalMoves\?\.length/);
+  assert.match(client, /design\.setDraft\(\{ kind: "move"/);
   assert.match(client, /artilleryMode = false; moveFrom = null;/);
-  // 引擎必須把移動規則送給前端，前端不自己抄
   const state = fixed().visibleStateFor(1);
   assert.deepEqual(state.movementRules, GameEngine.movementRules());
   assert.equal(state.movementRules.onlyWhenCannotDeploy, true);
@@ -840,7 +784,7 @@ test("階段一：終局原因與致勝五顆直接使用引擎資料", () => {
   assert.equal(AlphaUI.finalFiveOwner(final, 2, 2), 1);
   assert.equal(AlphaUI.finalFiveOwner(final, 5, 5), 2);
   assert.equal(AlphaUI.finalFiveOwner(final, 0, 0), 0);
-  for (const text of [client, localClient]) assert.match(text, /UI\.finalFiveOwner\(/);
+  assert.match(battlefield, /UI\.finalFiveOwner\(/);
   assert.match(css, /\.cell\.final-five-p1/);
   assert.match(css, /\.cell\.final-five-p2/);
 });
@@ -860,7 +804,7 @@ test("階段一：灰色操作直接顯示原因，炮擊原因兩端共用", ()
     assert.match(text, /UI\.artilleryDisabledReason\(/, `${name} 必須使用共用炮擊原因`);
     assert.match(text, /artilleryBtn\.textContent = disabledReason|artilleryButton\.textContent = disabledReason/,
       `${name} 必須把原因直接寫在炮擊按鈕上`);
-    assert.match(text, /手牌與炮擊會在可操作時恢復/, `${name} 必須在固定狀態列說明整體停用原因`);
+    assert.match(text, /操作暫停：|手牌與炮擊會在可操作時恢復/, `${name} 必須在固定狀態列說明整體停用原因`);
   }
   assert.match(client, /等待伺服器回應/);
 });
@@ -868,7 +812,7 @@ test("階段一：灰色操作直接顯示原因，炮擊原因兩端共用", ()
 test("階段一：連線操作等待 10 秒會自動解除，收到結果則取消計時", () => {
   assert.match(client, /const REQUEST_TIMEOUT_MS = 10_000/);
   assert.match(client, /pendingRequestTimer = setTimeout\([\s\S]*?REQUEST_TIMEOUT_MS\);/);
-  assert.match(client, /伺服器超過 \$\{REQUEST_TIMEOUT_MS \/ 1000\} 秒沒有回傳新狀態，已解除等待，請重試/);
+  assert.match(client, /伺服器超過 \$\{REQUEST_TIMEOUT_MS \/ 1000\} 秒沒有回傳新狀態；尚未確認結果，正在同步最新局面/);
   assert.match(client, /send\(\{ type: "action"[\s\S]*?schedulePendingRequestTimeout\(\)/,
     "送出操作後必須開始倒數");
   assert.match(client, /message\.type === "state"[\s\S]*?clearPendingRequest\(\)/,
@@ -943,8 +887,8 @@ test("階段二：主攻擊、傷害、斬入、反震依序播放，兩端完�
 
   for (const [name, text] of [["local_client.js", localClient], ["alpha_client.js", client]]) {
     assert.match(text, /UI\.createCombatPlayback\(/, `${name} 必須使用共用播放器`);
-    assert.match(text, /div\.dataset\.unitId = String\(unit\.id\)/,
-      `${name} 必須讓斬入演出能鎖定權威單位`);
+    assert.match(battlefield, /piece\.dataset\.unitId = String\(unit\.id\)/,
+      `${name} 的共用棋盤必須帶權威單位 ID`);
     assert.match(text, /戰鬥演出中/, `${name} 演出期間必須鎖住操作`);
     assert.match(text, /pendingCombat \|\| combatPlayback\.active\(\)/,
       `${name} 終局層不得蓋住尚未播完的戰鬥`);
@@ -1029,8 +973,8 @@ test("階段四：明確結束回合、醒目提示與權威逾時在兩端共�
     "可結束時按鈕必須主動脈動提示");
   assert.match(shellCss, /@media \(prefers-reduced-motion:reduce\)/,
     "必須尊重減少動態效果的系統設定");
-  assert.match(layoutCss, /grid-template-rows:\s*335px 112px minmax\(0, 1fr\)/,
-    "單機側欄必須為新增按鈕保留高度，不能讓它被固定 section 裁掉");
+  assert.match(designCss, /\.battleDesign \.selfBand\.turnSection\s*\{[^}]*overflow:\s*visible/,
+    "回合操作區不可裁切新增按鈕");
   assert.match(sharedUi, /GameEngine[\s\S]*?timeoutRules\(\)/,
     "規則視窗的秒數必須向引擎讀取");
   assert.match(server, /GameEngine\.timeoutRules\(\)\.disconnectMs/,
