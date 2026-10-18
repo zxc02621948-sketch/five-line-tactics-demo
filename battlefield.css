@@ -205,10 +205,10 @@ body.battleDesign { height: auto; min-height: 100dvh; overflow: visible; backgro
   .battleDesign .card > .weaponIcon { display: block; width: 23px; height: 23px; color: #d5c19a; }
   .battleDesign .card .name { font-size: 13px; }
   .battleDesign .card .cardTag { font-size: 9px; }
-  .detailRail { position: static; height: auto; min-height: 0; grid-template-rows: 60px 120px; gap: 8px; }
+  .detailRail { position: static; height: auto; min-height: 0; grid-template-rows: 84px 120px; gap: 8px; }
   .rankControls { display: grid; grid-template-columns: minmax(0,1fr) 78px; gap: 8px; }
-  .battleDesign .rankRow { grid-template-rows: 60px; gap: 6px; }
-  .battleDesign .rankRow > .btn { height: 60px; font-size: 13px; padding: 5px; }
+  .battleDesign .rankRow { grid-template-rows: 84px; gap: 6px; }
+  .battleDesign .rankRow > .btn { height: 84px; font-size: 13px; padding: 5px; }
   .battleDesign #unitDetailBtn { display: block; min-width: 0; white-space: normal; line-height: 1.5; padding: 8px; }
   .battleDesign .cardDetail, .battleDesign .cardDetail.idle { display: none; }
   .confirmationPanel { grid-template-rows: 46px 62px; gap: 8px; padding: 0; }
