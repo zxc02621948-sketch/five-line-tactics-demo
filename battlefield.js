@@ -31,6 +31,8 @@
           <details id="matchMenu" class="matchMenu">
             <summary class="btn matchMenuSummary">對局選單</summary>
             <div class="matchMenuPanel">
+              <a class="btn" href="/learn" target="_blank" rel="noopener" aria-label="新手教學，另開分頁">新手教學 ↗</a>
+              <span class="menuInfo">教學另開分頁；正在進行的對局仍會計時。</span>
               <button id="logDrawerToggle" class="btn" type="button" aria-controls="logDrawer" aria-expanded="false">戰鬥紀錄</button>
               ${online ? '<button id="leaveRoomBtn" class="btn danger" type="button">棄賽並離開</button>'
                 : '<button id="pveBtn" class="btn" type="button">對電腦</button><button id="pvpBtn" class="btn" type="button">本機雙人</button><button id="resetBtn" class="btn" type="button">重開</button><button id="fullscreenBtn" class="btn" type="button">全螢幕</button><button id="resignBtn" class="btn danger hidden" type="button">棄賽</button><a class="btn modeLink" href="/">連線大廳</a>'}

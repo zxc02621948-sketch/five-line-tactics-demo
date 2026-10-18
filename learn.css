@@ -1,0 +1,118 @@
+:root { color-scheme: dark; --bg:#141b1b; --panel:#202924; --line:#59614e; --text:#e9e5d9; --muted:#b9bbae; --gold:#d4b57b; }
+* { box-sizing:border-box; }
+body { margin:0; background:radial-gradient(ellipse at top left,#2b352b,var(--bg) 65%); color:var(--text); font:16px/1.7 system-ui,-apple-system,"Segoe UI","Noto Sans TC",sans-serif; min-height:100dvh; }
+button,a { -webkit-tap-highlight-color:transparent; }
+button { font:inherit; }
+a { color:inherit; }
+[hidden] { display:none !important; }
+:is(button,a,[tabindex]):focus-visible { outline:3px solid #f4d69b; outline-offset:4px; }
+.skipLink { position:absolute; top:-100px; left:12px; z-index:10; padding:12px; background:var(--gold); color:#17251d; }
+.skipLink:focus { top:12px; }
+.learnApp { width:min(1120px,100%); margin:auto; padding:20px 28px calc(110px + env(safe-area-inset-bottom)); }
+.learnHeader { display:flex; align-items:center; gap:16px; padding-bottom:18px; border-bottom:1px solid var(--line); }
+.brand { font-family:Georgia,"Noto Serif TC",serif; text-decoration:none; font-size:26px; font-weight:700; letter-spacing:.12em; }
+.learnHeader > span { color:var(--muted); font-size:13px; }
+.learnHeader > .button { margin-left:auto; }
+.button { display:inline-flex; align-items:center; justify-content:center; text-align:center; min-height:48px; padding:10px 16px; border:1px solid var(--line); border-radius:8px; color:var(--text); background:#2a342a; text-decoration:none; line-height:1.4; cursor:pointer; }
+.button:hover:not(:disabled) { background:#3c4634; border-color:#baaa7e; }
+.button:disabled { opacity:.55; cursor:default; }
+.button.primary { background:var(--gold); border-color:#ead39d; color:#18271e; font-weight:750; }
+.button.primary:hover:not(:disabled) { background:#e4ca94; }
+.button.subtle { background:transparent; color:var(--muted); }
+.practiceNotice { margin:18px 0; color:var(--muted); font-size:13px; padding:12px 16px; border:1px solid #4b5447; border-radius:8px; }
+.stepNav { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px; }
+.stepNav button { min-width:0; min-height:54px; padding:8px 4px; border:1px solid var(--line); border-radius:7px; background:#1c2621; color:var(--muted); font-size:14px; cursor:pointer; }
+.stepNav button[aria-current="step"] { color:#f4ddb0; background:#3a402d; border-color:var(--gold); box-shadow:inset 0 -3px var(--gold); }
+.lessonHeading { min-height:166px; padding:28px 0 18px; }
+.eyebrow { color:#c9b88e; font-size:12px; letter-spacing:.14em; }
+h1,h2,p { margin-top:0; }
+h1 { font-size:clamp(25px,3vw,36px); margin:6px 0 8px; line-height:1.4; }
+h1:focus { outline:none; }
+h2 { font-size:22px; line-height:1.5; margin-bottom:14px; }
+.lessonHeading p { color:var(--muted); margin:0; max-width:70ch; }
+.unitPanel,.boardPanel,.turnPanel,.combatPanel { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,1fr); gap:28px; align-items:start; min-height:560px; }
+.unitPicker,.practiceControls,.commandCard,.combatGuide,.readyCard { background:#1e2821; border:1px solid var(--line); border-radius:12px; padding:24px; }
+.typeChoices,.rankChoices { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-bottom:14px; }
+.typeChoices button { gap:6px; padding-inline:8px; }
+.rankChoices { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.rankChoices button { flex-direction:column; gap:3px; font-size:14px; }
+.rankChoices small { color:inherit; font-size:11px; }
+button[aria-pressed="true"] { outline:2px solid var(--gold); outline-offset:-2px; background:#3c422c; color:#f3ddb1; }
+.weaponIcon { width:26px; height:28px; flex:0 0 auto; }
+.goldText { color:#e8cb91; min-height:28px; }
+.smallText { color:var(--muted); font-size:13px; line-height:1.8; }
+.exampleHand { display:flex; gap:10px; margin-bottom:10px; min-height:96px; }
+.exampleCard { display:flex; flex-direction:column; align-items:center; justify-content:center; width:76px; min-height:96px; border:1px solid #5c654d; border-radius:8px; background:#303b2c; font-size:12px; gap:5px; }
+.exampleCard.used { border:2px solid var(--gold); color:#efd29c; }
+.goalNote { padding-top:18px; margin-top:20px; border-top:1px solid #4b5545; }
+.goalNote strong { color:#e1c58e; }
+.goalNote p { font-size:14px; margin:8px 0 0; color:var(--muted); }
+.unitDetail { border:1px solid #887959; border-radius:12px; overflow:hidden; background:#212a22; max-height:720px; overflow-y:auto; }
+.detailPortrait { height:300px; background:#333d2c; }
+.detailPortrait img { width:100%; height:100%; object-fit:cover; object-position:50% 15%; display:block; }
+.detailContent { padding:20px; }
+.detailEyebrow { color:#c4ae7d; font-size:12px; letter-spacing:.12em; }
+.detailHead { display:flex; justify-content:space-between; align-items:center; color:var(--gold); margin-top:8px; }
+.detailHead h2 { color:#eee1c5; letter-spacing:.12em; }
+.detailStats { display:grid; grid-template-columns:1fr 1fr; border-block:1px solid #515b46; padding:12px 0; font-size:13px; color:var(--muted); }
+.detailStats strong { color:#f1deba; font-size:24px; margin-left:6px; }
+.detailAbility { margin-top:18px; font-size:14px; }
+.detailAbility b { color:var(--gold); }
+.detailAbility ul { padding-left:20px; margin:6px 0; }
+.detailMeta { color:var(--muted); font-size:12px; margin-top:18px; }
+.boardCaption { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; font-size:12px; color:var(--muted); }
+.boardCaption > :first-child { color:#e3c791; }
+.boardFrame { padding:12px; background:#3f4035; border:1px solid #8a7856; border-radius:9px; }
+.practiceBoard { display:grid; grid-template-columns:repeat(9,minmax(0,1fr)); aspect-ratio:1; border:1px solid #4c483b; }
+.practiceCell { position:relative; min-width:0; min-height:0; padding:0; border:0; border-right:1px solid #514b3d; border-bottom:1px solid #514b3d; border-radius:0; background:#756c5d; touch-action:manipulation; cursor:pointer; }
+.practiceCell:nth-child(even) { background:#6d6456; }
+.practiceCell:nth-child(9n) { border-right:0; }
+.practiceCell:nth-last-child(-n+9) { border-bottom:0; }
+.practiceCell:hover { background:#8e816b; }
+.practiceCell:focus-visible { outline-offset:-3px; z-index:1; }
+.practiceCell.selected { box-shadow:inset 0 0 0 3px #f4d692; }
+.practiceCell.inBlast { background:#9d6e45; box-shadow:inset 0 0 0 1px #ebc886; }
+.practiceCell.blastCenter { box-shadow:inset 0 0 0 3px #ffdeb1; }
+.samplePiece { display:grid; place-items:center; position:absolute; inset:8%; border:2px solid #cc8d76; border-radius:50%; color:#ffe5bc; background:#7d463b; box-shadow:inset 0 0 0 3px #a36c55; pointer-events:none; }
+.samplePiece.p2 { color:#e1f0e7; background:#3b6470; border-color:#94bfc6; border-radius:8%; clip-path:polygon(22% 0,78% 0,100% 22%,100% 78%,78% 100%,22% 100%,0 78%,0 22%); box-shadow:none; }
+.samplePiece.preview { opacity:.6; border-style:dashed; }
+.samplePiece .weaponIcon { width:46%; height:46%; }
+.sampleStars { position:absolute; top:5%; font-size:8px; line-height:1; }
+.sampleDamage { position:absolute; bottom:0; right:1px; z-index:2; color:#171e16; background:#f0d095; border-radius:3px; font-size:10px; padding:0 2px; line-height:1.4; pointer-events:none; }
+.practiceStatus { min-height:104px; padding:14px; margin:18px 0; border:1px solid #616a4d; border-radius:8px; background:#283322; color:#ecdaae; font-size:14px; }
+.practiceButtons,.commandButtons { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.practiceButtons .button { min-height:60px; }
+.practiceControls > .button { width:100%; margin-top:10px; }
+.turnNotes { padding:0 8px; }
+.turnNotes .goalNote:first-child { margin-top:0; }
+.combatSteps { padding:0; list-style:none; counter-reset:stages; }
+.combatSteps li { counter-increment:stages; display:grid; grid-template-columns:34px 1fr; gap:3px 12px; padding:14px 0; border-bottom:1px solid #414c3c; }
+.combatSteps li::before { content:counter(stages); display:grid; place-items:center; width:30px; height:30px; background:#39422b; border:1px solid #877b54; border-radius:50%; color:#e1c690; grid-row:1 / 3; }
+.combatSteps li span { grid-column:2; color:var(--muted); font-size:14px; }
+.readyCard .button { width:100%; margin-top:12px; }
+.lessonFooter { position:fixed; bottom:0; left:0; right:0; display:grid; grid-template-columns:140px minmax(0,1fr) 140px; gap:12px; align-items:center; padding:14px max(24px,calc((100vw - 1064px)/2)) calc(14px + env(safe-area-inset-bottom)); background:#18221df5; border-top:1px solid #59614d; z-index:5; }
+.lessonFooter span { text-align:center; font-size:13px; color:var(--muted); }
+@media (max-width:760px) {
+  .learnApp { padding:12px 14px calc(110px + env(safe-area-inset-bottom)); }
+  .learnHeader { gap:8px; flex-wrap:wrap; }
+  .brand { font-size:21px; }
+  .learnHeader > span { font-size:11px; }
+  .learnHeader > .button { padding-inline:9px; font-size:12px; }
+  .practiceNotice { font-size:12px; padding:10px 12px; }
+  .stepNav { gap:5px; }
+  .stepNav button { font-size:11px; min-height:54px; white-space:normal; }
+  .lessonHeading { min-height:166px; padding-top:22px; }
+  .lessonHeading p { font-size:14px; }
+  .unitPanel,.boardPanel,.turnPanel,.combatPanel { grid-template-columns:minmax(0,1fr); gap:18px; }
+  .unitPicker,.practiceControls,.commandCard,.combatGuide,.readyCard { padding:18px; }
+  .unitDetail { max-height:none; }
+  .detailPortrait { height:280px; }
+  .boardFrame { padding:6px; }
+  .samplePiece { border-width:1.5px; }
+  .samplePiece .weaponIcon { width:42%; height:42%; }
+  .sampleStars { font-size:6px; }
+  .sampleDamage { font-size:9px; }
+  .lessonFooter { grid-template-columns:90px minmax(0,1fr) 90px; gap:8px; padding-inline:14px; }
+  .lessonFooter .button { padding-inline:8px; font-size:13px; }
+  .lessonFooter span { font-size:11px; }
+}

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#141b1b">
+  <title>五連戰線｜新手教學</title>
+  <link rel="icon" href="/icon-192.png">
+  <link rel="stylesheet" href="/learn.css?v=1">
+</head>
+<body>
+  <a class="skipLink" href="#lessonTitle">跳到教學</a>
+  <div class="learnApp">
+    <header class="learnHeader">
+      <a class="brand" href="/">五連戰線</a>
+      <span>第一次上陣</span>
+      <a class="button subtle" href="/">返回大廳</a>
+    </header>
+    <div class="practiceNotice">這裡可以放心練習，不會建立對局。若另一個分頁正在對局，該局計時仍會繼續。</div>
+    <nav id="stepNav" class="stepNav" aria-label="教學步驟"></nav>
+    <main>
+      <div class="lessonHeading">
+        <span id="stepCounter" class="eyebrow"></span>
+        <h1 id="lessonTitle" tabindex="-1"></h1>
+        <p id="lessonIntro"></p>
+      </div>
+
+      <section id="unitPanel" class="unitPanel" aria-label="認識兵種">
+        <div class="unitPicker">
+          <h2>先挑一種兵</h2>
+          <div id="typeChoices" class="typeChoices" role="group" aria-label="兵種"></div>
+          <div id="rankChoices" class="rankChoices" role="group" aria-label="星級"></div>
+          <p id="costText" class="goldText"></p>
+          <div id="exampleHand" class="exampleHand" aria-label="耗牌示意"></div>
+          <p class="smallText">金色卡框標出這次會消耗的手牌；同兵種的精英有在場數量限制。</p>
+          <div class="goalNote"><strong>你的目標</strong><p>橫、直、斜連成五顆，並且撐過本輪交戰。放下第五顆時，還不會立刻獲勝。</p></div>
+        </div>
+        <div id="unitDetail" class="unitDetail" tabindex="0" aria-label="兵種能力"></div>
+      </section>
+
+      <section id="boardPanel" class="boardPanel" hidden aria-label="操作練習">
+        <div>
+          <div class="boardCaption"><span id="boardMode"></span><span>教學示意盤面</span></div>
+          <div class="boardFrame"><div id="practiceBoard" class="practiceBoard" role="group" aria-label="教學棋盤；方向鍵移動焦點，Enter 選取"></div></div>
+          <p class="smallText">半透明、虛線棋子＝尚未確認。選錯格可以重新點選，或按取消／Esc。</p>
+        </div>
+        <aside class="practiceControls">
+          <span class="eyebrow">現在輪到你練習</span>
+          <h2 id="practiceHeading"></h2>
+          <p id="practiceHint"></p>
+          <p id="practiceStatus" class="practiceStatus" role="status"></p>
+          <div class="practiceButtons">
+            <button id="cancelPractice" class="button" type="button" disabled>取消預覽</button>
+            <button id="confirmPractice" class="button primary" type="button" disabled>請先選棋格</button>
+          </div>
+          <button id="resetPractice" class="button subtle" type="button">重新練習這一步</button>
+          <div id="artilleryLegend" class="goalNote" hidden><strong>炮擊會傷及友軍</strong><p id="artilleryRulesText"></p></div>
+        </aside>
+      </section>
+
+      <section id="turnPanel" class="turnPanel" hidden aria-label="結束回合">
+        <div class="commandCard">
+          <span class="eyebrow">自己的玩家資訊帶</span>
+          <h2>部署後，還是你的回合</h2>
+          <p>可在部署／移動之前或之後炮擊；炮擊不能代替主要行動。</p>
+          <div class="commandButtons">
+            <button id="reviewArtillery" class="button" type="button">回去練習炮擊</button>
+            <button id="endTurnPractice" class="button primary" type="button" disabled>結束回合</button>
+          </div>
+          <p id="turnPracticeStatus" class="practiceStatus" role="status"></p>
+          <button id="reviewDeploy" class="button subtle" type="button">回去練習部署</button>
+        </div>
+        <div class="turnNotes">
+          <div class="goalNote"><strong>不能按時，看按鈕旁的原因</strong><p>例如尚未部署、等待回應、對手回合，或本回合炮擊已使用。送出後等正式狀態確認，不要連點。</p></div>
+          <div class="goalNote"><strong>沒有手牌時，改為移動</strong><p>選自己的棋子 → 選標示的相鄰空格 → 確認移動 → 結束回合。移動與精英劍斬入形成的五連也有效，仍須通過戰後檢查。</p></div>
+          <div class="goalNote"><strong>對局有時間限制</strong><p id="timeoutText"></p></div>
+        </div>
+      </section>
+
+      <section id="combatPanel" class="combatPanel" hidden aria-label="理解戰鬥與開始遊戲">
+        <div class="combatGuide">
+          <h2>雙方完成行動，才會全場交戰</h2>
+          <ol class="combatSteps">
+            <li><strong>主攻擊與護衛</strong><span>攻擊線顯示誰打誰，以及傷害轉移給哪個盾兵。</span></li>
+            <li><strong>傷害與陣亡</strong><span>看傷害數字與淡出的棋子，盤面會在交戰後改變。</span></li>
+            <li><strong>精英劍斬入</strong><span>擊殺後可能移入死亡格並追擊；沿軌跡看新的位置。</span></li>
+            <li><strong>精英盾反震</strong><span id="reflectionText"></span></li>
+          </ol>
+          <div class="goalNote"><strong>最後檢查存活五連</strong><p>只有單方保有五連才判勝；雙方同輪五連會進入加賽。演出可跳過，勝負仍以正式結算為準。</p></div>
+        </div>
+        <aside class="readyCard">
+          <span class="eyebrow">準備上陣</span><h2>先試一局</h2>
+          <p>記住：先選牌、點格預覽、確認行動，最後按結束回合。</p>
+          <p id="completionText" class="smallText"></p>
+          <a class="button primary" href="/local">單機對局</a>
+          <a class="button" href="/">前往連線大廳</a>
+          <button id="restartLesson" class="button subtle" type="button">從頭再看一次</button>
+        </aside>
+      </section>
+    </main>
+    <footer class="lessonFooter"><button id="previousStep" class="button" type="button" disabled>上一步</button><span id="progressText" aria-live="polite"></span><button id="nextStep" class="button primary" type="button">下一步</button></footer>
+    <noscript><p class="practiceNotice">請啟用 JavaScript 才能操作教學。基本流程：選牌 → 點格預覽 → 確認部署 → 選用炮擊 → 結束回合 → 戰後檢查五連。</p></noscript>
+  </div>
+  <script src="/game_engine.js?v=20260908"></script>
+  <script src="/alpha_ui.js?v=20260908"></script>
+  <script src="/battlefield.js?v=20261018"></script>
+  <script src="/learn.js?v=1"></script>
+</body>
+</html>
